@@ -30,7 +30,6 @@
         
         /* Sub Controls (Hidden by default) */
         #sub-controls { display: none; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 15px; animation: fadeIn 0.3s ease; }
-        /* Updated button style to handle two lines of text */
         .sub-btn { font-size: 0.8rem; padding: 8px 4px; line-height: 1.3; }
         .sub-time { display: block; font-size: 0.7em; opacity: 0.7; font-weight: normal; }
         
@@ -135,7 +134,6 @@ function setMode(mode, btn) {
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     
-    // Toggle Sub Controls
     if (mode === '3day') {
         subControls.style.display = 'grid';
     } else {
@@ -162,50 +160,72 @@ async function calculateRun() {
     resultArea.style.display = 'block';
     resultArea.innerHTML = '<p style="color:#64748b; text-align:center;">Analyzing weather patterns...</p>';
 
+    // Fetch 3 days of data with the city's timezone
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${selectedLat}&longitude=${selectedLon}&hourly=apparent_temperature,precipitation_probability,wind_speed_10m&timezone=${selectedTimezone}&forecast_days=3`;
     
     try {
         const res = await fetch(url);
         const data = await res.json();
 
+        // 1. DETERMINE "NOW" IN THE TARGET CITY
+        // We create a Date object that "looks like" the time in the target city
+        // by converting the current browser time to the target timezone string, 
+        // then parsing it back.
+        const cityNow = new Date(new Date().toLocaleString("en-US", { timeZone: selectedTimezone }));
+
         let candidates = data.hourly.time.map((t, i) => {
-            const dateObj = new Date(t);
+            // "t" is the ISO string from API (e.g. "2023-10-27T14:00")
+            // Because we requested &timezone, this string is local to the city.
+            // We parse it into a date object to compare with cityNow.
+            // Note: Both cityNow and this new Date(t) will share the browser's context 
+            // but have the correct relative "face value" for comparison.
+            const slotTime = new Date(t);
+            
             return {
-                time: t,
-                displayTime: dateObj.toLocaleTimeString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
-                hourVal: dateObj.getHours(), // 0-23
+                timeObj: slotTime, // Store for filtering
+                displayTime: slotTime.toLocaleTimeString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
+                hourVal: slotTime.getHours(),
                 temp: data.hourly.apparent_temperature[i],
                 precip: data.hourly.precipitation_probability[i],
                 wind: data.hourly.wind_speed_10m[i],
-                // Score: Ideal 10°C, 0 rain, low wind
                 score: 100 - (Math.abs(data.hourly.apparent_temperature[i] - 10) * 2) - (data.hourly.precipitation_probability[i] * 0.8) - (data.hourly.wind_speed_10m[i] * 0.6)
             };
         });
 
-        // --- FILTERING ---
+        // 2. FILTER OUT PAST TIMES
+        // Remove any slot where the time is older than "now" in that city
+        candidates = candidates.filter(c => c.timeObj >= cityNow);
+
+        if (candidates.length === 0) {
+            resultArea.innerHTML = '<p style="text-align:center;">No upcoming slots found (is it late at night?). Try "Best in 3 Days".</p>';
+            return;
+        }
+
+        // --- FILTERING MODES ---
         if (currentMode === 'asap') {
+            // Take the best from the next 24 available hours
             candidates = candidates.slice(0, 24);
         } 
         else if (currentMode === 'tonight') {
-            const todayStr = new Date().toISOString().split('T')[0]; 
-            candidates = candidates.slice(0, 24).filter(c => c.hourVal >= 17 && c.hourVal <= 22);
+            // Check strictly for "Today" evening in that city
+            // We compare the date string of the slot vs the date string of "now" in that city
+            const todayStr = cityNow.toLocaleDateString();
+            candidates = candidates.filter(c => {
+                return c.timeObj.toLocaleDateString() === todayStr && c.hourVal >= 17 && c.hourVal < 22;
+            });
         }
         else if (currentMode === '3day') {
-            // Apply Sub-Filter with NEW times
             if (currentSubMode === 'morning') {
-                // Morning: 08:00 to 11:00 (strictly before 11)
                 candidates = candidates.filter(c => c.hourVal >= 8 && c.hourVal < 11);
             } else if (currentSubMode === 'midday') {
-                // Midday: 11:00 to 17:00 (strictly before 17)
                 candidates = candidates.filter(c => c.hourVal >= 11 && c.hourVal < 17);
             } else if (currentSubMode === 'evening') {
-                // Evening: 17:00 to 22:00
                 candidates = candidates.filter(c => c.hourVal >= 17 && c.hourVal < 22);
             }
         }
 
         if (candidates.length === 0) {
-            resultArea.innerHTML = '<p style="text-align:center;">No good slots found in this specific time range.</p>';
+            resultArea.innerHTML = '<p style="text-align:center;">No matching time slots found.</p>';
             return;
         }
 
@@ -231,6 +251,7 @@ async function calculateRun() {
         `;
 
     } catch (e) {
+        console.error(e);
         resultArea.innerHTML = '<p style="color:red; text-align:center;">Error fetching data.</p>';
     }
 }
