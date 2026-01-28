@@ -264,14 +264,10 @@ async function calculateRun() {
     resultArea.style.display = 'block';
     resultArea.innerHTML = '<p style="color:#64748b; text-align:center;">Analyzing weather & air quality...</p>';
 
-    // 1. Define URLs for Weather and Air Quality
     const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${selectedLat}&longitude=${selectedLon}&hourly=apparent_temperature,precipitation_probability,wind_speed_10m&daily=sunset&timezone=${selectedTimezone}&forecast_days=3`;
-    
-    // We fetch "european_aqi" (CAQI) which is standard for EU/Global usage in Open-Meteo
     const aqiUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${selectedLat}&longitude=${selectedLon}&hourly=european_aqi&timezone=${selectedTimezone}&forecast_days=3`;
 
     try {
-        // 2. Fetch both APIs simultaneously
         const [weatherRes, aqiRes] = await Promise.all([
             fetch(weatherUrl),
             fetch(aqiUrl)
@@ -281,23 +277,43 @@ async function calculateRun() {
         const aqiData = await aqiRes.json();
         const cityNow = new Date(new Date().toLocaleString("en-US", { timeZone: selectedTimezone }));
 
-        // 3. Merge Data
-        let candidates = data.hourly.time.map((t, i) => {
-            const slotTime = new Date(t);
-            // Get AQI for this specific hour (handle potential missing data safely)
-            const aqiValue = aqiData.hourly && aqiData.hourly.european_aqi ? aqiData.hourly.european_aqi[i] : null;
+        // 3. Merge & Interpolate Data (30-min resolution)
+        let candidates = [];
+        const len = data.hourly.time.length;
 
-            return {
-                timeObj: slotTime,
-                displayTime: slotTime.toLocaleTimeString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
-                hourVal: slotTime.getHours(),
-                temp: data.hourly.apparent_temperature[i],
-                precip: data.hourly.precipitation_probability[i],
-                wind: data.hourly.wind_speed_10m[i],
-                aqi: aqiValue,
-                score: 100 - (Math.abs(data.hourly.apparent_temperature[i] - 10) * 2) - (data.hourly.precipitation_probability[i] * 0.8) - (data.hourly.wind_speed_10m[i] * 0.6)
-            };
-        });
+        for (let i = 0; i < len; i++) {
+            // A. Exact Hour Data
+            const t1 = new Date(data.hourly.time[i]);
+            const temp1 = data.hourly.apparent_temperature[i];
+            const precip1 = data.hourly.precipitation_probability[i];
+            const wind1 = data.hourly.wind_speed_10m[i];
+            const aqi1 = aqiData.hourly?.european_aqi ? aqiData.hourly.european_aqi[i] : null;
+
+            candidates.push(createCandidate(t1, temp1, precip1, wind1, aqi1));
+
+            // B. Interpolate Half-Hour (if next hour exists)
+            if (i < len - 1) {
+                const temp2 = data.hourly.apparent_temperature[i+1];
+                const precip2 = data.hourly.precipitation_probability[i+1];
+                const wind2 = data.hourly.wind_speed_10m[i+1];
+                const aqi2 = aqiData.hourly?.european_aqi ? aqiData.hourly.european_aqi[i+1] : null;
+
+                // Time + 30 mins
+                const tMid = new Date(t1.getTime() + 30 * 60000);
+                
+                // Linear Interpolation (Average)
+                const tempMid = (temp1 + temp2) / 2;
+                const precipMid = (precip1 + precip2) / 2; 
+                const windMid = (wind1 + wind2) / 2;
+                
+                // Handle nulls for AQI
+                let aqiMid = null;
+                if (aqi1 !== null && aqi2 !== null) aqiMid = (aqi1 + aqi2) / 2;
+                else aqiMid = aqi1 || aqi2;
+
+                candidates.push(createCandidate(tMid, tempMid, precipMid, windMid, aqiMid));
+            }
+        }
 
         // Filter past times
         candidates = candidates.filter(c => c.timeObj >= cityNow);
@@ -309,7 +325,7 @@ async function calculateRun() {
 
         // Apply Modes
         if (currentMode === 'asap') {
-            candidates = candidates.slice(0, 24);
+            candidates = candidates.slice(0, 48); // Increased slice to account for double data points
         } 
         else if (currentMode === 'tonight') {
             const todayStr = cityNow.toLocaleDateString();
@@ -332,9 +348,7 @@ async function calculateRun() {
         const best = candidates[0];
         const comment = getWittyComment(best, cityNow);
         
-        // --- BADGE LOGIC ---
-        
-        // Sunset Badge
+        // --- BADGE LOGIC (Unchanged) ---
         let sunsetHTML = '';
         if (currentMode === 'tonight' || (currentMode === '3day' && currentSubMode === 'evening')) {
             const runDateStr = best.timeObj.toISOString().split('T')[0];
@@ -346,28 +360,23 @@ async function calculateRun() {
             }
         }
 
-        // Hydration Badge (>20C)
         let hydroHTML = '';
         if (best.temp >= 20) {
             hydroHTML = `<div class="badge hydro-badge">💧 Hydration Req.</div>`;
         }
 
-        // AQI Badge
         let aqiHTML = '';
         if (best.aqi !== null) {
             let aqiClass = 'aqi-good';
             let aqiText = 'Good';
+            const val = Math.round(best.aqi); // Round for display
             
-            // CAQI Scale: 0-25 v.low, 25-50 low, 50-75 med, 75-100 high
-            if (best.aqi < 40) {
-                aqiClass = 'aqi-good'; 
-                aqiText = `AQI: ${best.aqi} (Clean)`;
-            } else if (best.aqi < 65) {
-                aqiClass = 'aqi-fair';
-                aqiText = `AQI: ${best.aqi} (Fair)`;
+            if (val < 40) {
+                aqiClass = 'aqi-good'; aqiText = `AQI: ${val} (Clean)`;
+            } else if (val < 65) {
+                aqiClass = 'aqi-fair'; aqiText = `AQI: ${val} (Fair)`;
             } else {
-                aqiClass = 'aqi-poor';
-                aqiText = `AQI: ${best.aqi} (Poor)`;
+                aqiClass = 'aqi-poor'; aqiText = `AQI: ${val} (Poor)`;
             }
             aqiHTML = `<div class="badge ${aqiClass}">🍃 ${aqiText}</div>`;
         }
@@ -382,7 +391,7 @@ async function calculateRun() {
                 <div class="time">${best.displayTime}</div>
                 <div class="meta">
                     <span>${best.temp.toFixed(1)}°C</span>
-                    <span>💧 ${best.precip}%</span>
+                    <span>💧 ${Math.round(best.precip)}%</span>
                     <span>💨 ${best.wind.toFixed(0)}km/h</span>
                 </div>
                 
@@ -401,6 +410,21 @@ async function calculateRun() {
         console.error(e);
         resultArea.innerHTML = '<p style="color:red; text-align:center;">Error fetching weather/AQI data.</p>';
     }
+}
+
+// Helper to create data object
+function createCandidate(timeObj, temp, precip, wind, aqi) {
+    return {
+        timeObj: timeObj,
+        displayTime: timeObj.toLocaleTimeString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
+        // Use float for filtering (e.g. 17:30 = 17.5)
+        hourVal: timeObj.getHours() + (timeObj.getMinutes() / 60), 
+        temp: temp,
+        precip: precip,
+        wind: wind,
+        aqi: aqi,
+        score: 100 - (Math.abs(temp - 10) * 2) - (precip * 0.8) - (wind * 0.6)
+    };
 }
 </script>
 
