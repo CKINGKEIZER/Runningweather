@@ -30,7 +30,10 @@
         
         /* Sub Controls (Hidden by default) */
         #sub-controls { display: none; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 15px; animation: fadeIn 0.3s ease; }
-        .sub-btn { font-size: 0.8rem; padding: 8px; }
+        /* Updated button style to handle two lines of text */
+        .sub-btn { font-size: 0.8rem; padding: 8px 4px; line-height: 1.3; }
+        .sub-time { display: block; font-size: 0.7em; opacity: 0.7; font-weight: normal; }
+        
         @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
 
         button.primary { background: var(--text); color: white; margin-top: 5px; padding: 14px; width: 100%; }
@@ -63,9 +66,18 @@
     </div>
 
     <div id="sub-controls">
-        <button class="sub-btn active" onclick="setSubMode('morning', this)">🌅 Morning</button>
-        <button class="sub-btn" onclick="setSubMode('midday', this)">☀️ Midday</button>
-        <button class="sub-btn" onclick="setSubMode('evening', this)">🌆 Evening</button>
+        <button class="sub-btn active" onclick="setSubMode('morning', this)">
+            🌅 Morning
+            <span class="sub-time">08:00 - 11:00</span>
+        </button>
+        <button class="sub-btn" onclick="setSubMode('midday', this)">
+            ☀️ Midday
+            <span class="sub-time">11:00 - 17:00</span>
+        </button>
+        <button class="sub-btn" onclick="setSubMode('evening', this)">
+            🌆 Evening
+            <span class="sub-time">17:00 - 22:00</span>
+        </button>
     </div>
 
     <button class="primary" onclick="calculateRun()">Find Best Time</button>
@@ -80,7 +92,7 @@ let selectedLat = null;
 let selectedLon = null;
 let selectedTimezone = null;
 let currentMode = 'asap';
-let currentSubMode = 'morning'; // Default sub-filter
+let currentSubMode = 'morning'; 
 let debounceTimer;
 
 const input = document.getElementById('city-input');
@@ -175,23 +187,25 @@ async function calculateRun() {
             candidates = candidates.slice(0, 24);
         } 
         else if (currentMode === 'tonight') {
-            const todayStr = new Date().toISOString().split('T')[0]; // Simple approx using browser time, ideal is utilizing timezone data but this suffices for "tonight" check
-            // For rigorous "tonight", we check the first 24h slice for hours 17-22
+            const todayStr = new Date().toISOString().split('T')[0]; 
             candidates = candidates.slice(0, 24).filter(c => c.hourVal >= 17 && c.hourVal <= 22);
         }
         else if (currentMode === '3day') {
-            // Apply Sub-Filter
+            // Apply Sub-Filter with NEW times
             if (currentSubMode === 'morning') {
-                candidates = candidates.filter(c => c.hourVal >= 6 && c.hourVal < 11);
+                // Morning: 08:00 to 11:00 (strictly before 11)
+                candidates = candidates.filter(c => c.hourVal >= 8 && c.hourVal < 11);
             } else if (currentSubMode === 'midday') {
-                candidates = candidates.filter(c => c.hourVal >= 11 && c.hourVal < 16);
+                // Midday: 11:00 to 17:00 (strictly before 17)
+                candidates = candidates.filter(c => c.hourVal >= 11 && c.hourVal < 17);
             } else if (currentSubMode === 'evening') {
-                candidates = candidates.filter(c => c.hourVal >= 16 && c.hourVal < 22);
+                // Evening: 17:00 to 22:00
+                candidates = candidates.filter(c => c.hourVal >= 17 && c.hourVal < 22);
             }
         }
 
         if (candidates.length === 0) {
-            resultArea.innerHTML = '<p style="text-align:center;">No matching time slots found in this range.</p>';
+            resultArea.innerHTML = '<p style="text-align:center;">No good slots found in this specific time range.</p>';
             return;
         }
 
@@ -199,7 +213,6 @@ async function calculateRun() {
         candidates.sort((a, b) => b.score - a.score);
         const best = candidates[0];
         
-        // Dynamic Label
         let label = "Top Pick";
         if (currentMode === 'tonight') label = "Best Evening Slot";
         if (currentMode === '3day') label = `Best ${currentSubMode.charAt(0).toUpperCase() + currentSubMode.slice(1)} Run`;
