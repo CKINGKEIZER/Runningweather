@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Golden Hour | Smart Run Planner</title>
+    
+    <meta name="description" content="Stop guessing. AI-powered weather analysis to find the perfect running window in your city.">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Golden Hour | Find Your Perfect Run">
+    <meta property="og:description" content="Don't run in the rain. Find the best 60-minute window based on wind, temp, and air quality.">
+    <meta property="og:url" content="https://www.runweather.org/">
+
     <style>
         :root { --primary: #00d2ff; --secondary: #3a7bd5; --accent: #ff9a9e; --bg: #f1f5f9; --text: #1e293b; }
         body { font-family: -apple-system, system-ui, sans-serif; background: linear-gradient(135deg, var(--primary), var(--secondary)); color: var(--text); min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; padding: 20px; box-sizing: border-box; }
@@ -44,8 +51,16 @@
         .time { font-size: 2rem; font-weight: 900; color: var(--secondary); margin: 10px 0; }
         .meta { font-size: 0.85rem; color: #64748b; margin-top: 5px; display: flex; justify-content: center; gap: 10px; align-items: center; }
         
-        /* Sunset Badge */
-        .sunset-badge { background: #fff1f2; color: #e11d48; padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; display: inline-block; margin-top: 8px; font-weight: 600; }
+        /* Badges Container */
+        .badges-container { display: flex; justify-content: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+        .badge { padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; display: inline-flex; align-items: center; }
+        
+        /* Specific Badge Colors */
+        .sunset-badge { background: #fff1f2; color: #e11d48; }
+        .hydro-badge { background: #dbeafe; color: #2563eb; }
+        .aqi-good { background: #dcfce7; color: #166534; }    /* Green */
+        .aqi-fair { background: #fef9c3; color: #854d0e; }    /* Yellow */
+        .aqi-poor { background: #fee2e2; color: #991b1b; }    /* Red */
 
         /* Dynamic Comment Style */
         .comment { margin-top: 15px; font-size: 1rem; font-style: italic; color: #334155; font-weight: 500; border-top: 1px solid #cbd5e1; padding-top: 12px; line-height: 1.4; }
@@ -226,7 +241,7 @@ function getWittyComment(best, cityNow) {
             "If you don't run now, you never will."
         ]);
     }
-    // 7. GENERIC / GOOD
+    // 7. GENERIC
     return pickRandom([
         "Your future self will thank you.",
         "Earn that post-run snack.",
@@ -247,18 +262,31 @@ async function calculateRun() {
     }
 
     resultArea.style.display = 'block';
-    resultArea.innerHTML = '<p style="color:#64748b; text-align:center;">Analyzing weather patterns...</p>';
+    resultArea.innerHTML = '<p style="color:#64748b; text-align:center;">Analyzing weather & air quality...</p>';
 
-    // ADDED: &daily=sunset to fetch sunset times
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${selectedLat}&longitude=${selectedLon}&hourly=apparent_temperature,precipitation_probability,wind_speed_10m&daily=sunset&timezone=${selectedTimezone}&forecast_days=3`;
+    // 1. Define URLs for Weather and Air Quality
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${selectedLat}&longitude=${selectedLon}&hourly=apparent_temperature,precipitation_probability,wind_speed_10m&daily=sunset&timezone=${selectedTimezone}&forecast_days=3`;
     
+    // We fetch "european_aqi" (CAQI) which is standard for EU/Global usage in Open-Meteo
+    const aqiUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${selectedLat}&longitude=${selectedLon}&hourly=european_aqi&timezone=${selectedTimezone}&forecast_days=3`;
+
     try {
-        const res = await fetch(url);
-        const data = await res.json();
+        // 2. Fetch both APIs simultaneously
+        const [weatherRes, aqiRes] = await Promise.all([
+            fetch(weatherUrl),
+            fetch(aqiUrl)
+        ]);
+
+        const data = await weatherRes.json();
+        const aqiData = await aqiRes.json();
         const cityNow = new Date(new Date().toLocaleString("en-US", { timeZone: selectedTimezone }));
 
+        // 3. Merge Data
         let candidates = data.hourly.time.map((t, i) => {
             const slotTime = new Date(t);
+            // Get AQI for this specific hour (handle potential missing data safely)
+            const aqiValue = aqiData.hourly && aqiData.hourly.european_aqi ? aqiData.hourly.european_aqi[i] : null;
+
             return {
                 timeObj: slotTime,
                 displayTime: slotTime.toLocaleTimeString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
@@ -266,6 +294,7 @@ async function calculateRun() {
                 temp: data.hourly.apparent_temperature[i],
                 precip: data.hourly.precipitation_probability[i],
                 wind: data.hourly.wind_speed_10m[i],
+                aqi: aqiValue,
                 score: 100 - (Math.abs(data.hourly.apparent_temperature[i] - 10) * 2) - (data.hourly.precipitation_probability[i] * 0.8) - (data.hourly.wind_speed_10m[i] * 0.6)
             };
         });
@@ -301,24 +330,46 @@ async function calculateRun() {
 
         candidates.sort((a, b) => b.score - a.score);
         const best = candidates[0];
-        
-        // GET RANDOM COMMENT
         const comment = getWittyComment(best, cityNow);
         
-        // GET SUNSET (If mode is 'tonight' or 'evening')
+        // --- BADGE LOGIC ---
+        
+        // Sunset Badge
         let sunsetHTML = '';
         if (currentMode === 'tonight' || (currentMode === '3day' && currentSubMode === 'evening')) {
-            // Find the sunset for the specific day of the best run
             const runDateStr = best.timeObj.toISOString().split('T')[0];
-            
-            // Look through daily.time to find index
             const dayIndex = data.daily.time.indexOf(runDateStr);
-            
             if (dayIndex !== -1) {
                 const sunsetStr = data.daily.sunset[dayIndex];
                 const sunsetTime = new Date(sunsetStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                sunsetHTML = `<div class="sunset-badge">Sunset: ${sunsetTime}</div>`;
+                sunsetHTML = `<div class="badge sunset-badge">Sunset: ${sunsetTime}</div>`;
             }
+        }
+
+        // Hydration Badge (>20C)
+        let hydroHTML = '';
+        if (best.temp >= 20) {
+            hydroHTML = `<div class="badge hydro-badge">💧 Hydration Req.</div>`;
+        }
+
+        // AQI Badge
+        let aqiHTML = '';
+        if (best.aqi !== null) {
+            let aqiClass = 'aqi-good';
+            let aqiText = 'Good';
+            
+            // CAQI Scale: 0-25 v.low, 25-50 low, 50-75 med, 75-100 high
+            if (best.aqi < 40) {
+                aqiClass = 'aqi-good'; 
+                aqiText = `AQI: ${best.aqi} (Clean)`;
+            } else if (best.aqi < 65) {
+                aqiClass = 'aqi-fair';
+                aqiText = `AQI: ${best.aqi} (Fair)`;
+            } else {
+                aqiClass = 'aqi-poor';
+                aqiText = `AQI: ${best.aqi} (Poor)`;
+            }
+            aqiHTML = `<div class="badge ${aqiClass}">🍃 ${aqiText}</div>`;
         }
 
         let label = "Top Pick";
@@ -334,7 +385,13 @@ async function calculateRun() {
                     <span>💧 ${best.precip}%</span>
                     <span>💨 ${best.wind.toFixed(0)}km/h</span>
                 </div>
-                ${sunsetHTML}
+                
+                <div class="badges-container">
+                    ${aqiHTML}
+                    ${hydroHTML}
+                    ${sunsetHTML}
+                </div>
+
                 <div class="comment">"${comment}"</div>
             </div>
             <button onclick="calculateRun()" style="margin-top:10px; background:white; border:1px solid #ddd;">Refresh</button>
@@ -342,7 +399,7 @@ async function calculateRun() {
 
     } catch (e) {
         console.error(e);
-        resultArea.innerHTML = '<p style="color:red; text-align:center;">Error fetching data.</p>';
+        resultArea.innerHTML = '<p style="color:red; text-align:center;">Error fetching weather/AQI data.</p>';
     }
 }
 </script>
