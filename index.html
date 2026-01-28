@@ -44,8 +44,8 @@
         .time { font-size: 2rem; font-weight: 900; color: var(--secondary); margin: 10px 0; }
         .meta { font-size: 0.85rem; color: #64748b; margin-top: 5px; display: flex; justify-content: center; gap: 10px; align-items: center; }
         
-        /* New Comment Style */
-        .comment { margin-top: 15px; font-size: 0.95rem; font-style: italic; color: #475569; font-weight: 500; border-top: 1px solid #e2e8f0; padding-top: 10px; }
+        /* Dynamic Comment Style */
+        .comment { margin-top: 15px; font-size: 1rem; font-style: italic; color: #334155; font-weight: 500; border-top: 1px solid #cbd5e1; padding-top: 12px; line-height: 1.4; }
         
         .bmc { display: block; text-align: center; margin-top: 2rem; color: #94a3b8; font-size: 0.8rem; text-decoration: none; }
     </style>
@@ -150,41 +150,93 @@ function setSubMode(sub, btn) {
     btn.classList.add('active');
 }
 
-// --- The Personality Engine ---
+// --- RANDOMIZED WITTY COMMENTS ---
+function pickRandom(arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
+}
+
 function getWittyComment(best, cityNow) {
     const diffHours = (best.timeObj - cityNow) / (1000 * 60 * 60);
-    
-    // 1. Is it NOW? (within 1 hour)
+
+    // 1. IS IT NOW? (within 1.5 hours)
     if (diffHours >= 0 && diffHours < 1.5) {
-        return "Run to your shoes! The window is open NOW.";
+        return pickRandom([
+            "Run to your shoes! The window is open NOW.",
+            "Stop scrolling, start running.",
+            "The pavement is calling. Don't be rude.",
+            "GO. GO. GO.",
+            "Shoes on. Door open. You got this."
+        ]);
     }
 
-    // 2. Is it raining?
+    // 2. IS IT RAINING?
     if (best.precip > 20) {
-        return "Don't worry, sweat is also wet.";
+        return pickRandom([
+            "Don't worry, sweat is also wet.",
+            "You're not made of sugar, you won't melt.",
+            "Skin is waterproof. You're fine.",
+            "Embrace the soak. It makes you look hardcore.",
+            "Think of it as a free shower."
+        ]);
     } else if (best.precip > 0) {
-        return "A little drizzle never hurt anyone. Free shower!";
+        return pickRandom([
+            "A little drizzle never hurt anyone.",
+            "Just a bit of mist to keep you cool.",
+            "Moist. But runnable.",
+            "Rain jacket or raw dog it? Up to you."
+        ]);
     }
 
-    // 3. Is it windy?
+    // 3. IS IT WINDY?
     if (best.wind > 25) {
-        return "Headwind builds character. Good luck.";
+        return pickRandom([
+            "Headwind builds character.",
+            "Nature's resistance training.",
+            "Hold onto your hat.",
+            "If you run fast enough, you ARE the wind.",
+            "It's breezy. Good luck."
+        ]);
     }
 
-    // 4. Is it hot/cold?
+    // 4. IS IT HOT?
     if (best.temp > 22) {
-        return "It's a warm one. Hydrate or die-drate.";
-    } else if (best.temp < 5) {
-        return "Run fast to stay warm. Frosty!";
+        return pickRandom([
+            "It's a warm one. Hydrate or die-drate.",
+            "Sweat equity is high today.",
+            "Spicy weather. Bring water.",
+            "Sun's out, run's out."
+        ]);
     }
 
-    // 5. Is it perfect? (10C +/- 2, no rain, low wind)
+    // 5. IS IT COLD?
+    if (best.temp < 5) {
+        return pickRandom([
+            "Run fast to stay warm.",
+            "If you stop, you freeze. Great motivation!",
+            "Be bold, start cold.",
+            "Crispy air awaits."
+        ]);
+    }
+
+    // 6. IS IT PERFECT? (The Golden Zone)
     if (best.temp >= 8 && best.temp <= 14 && best.precip === 0 && best.wind < 15) {
-        return "Chef's kiss conditions. Literally no excuses.";
+        return pickRandom([
+            "Chef's kiss conditions. Literally no excuses.",
+            "PB weather. Go get it.",
+            "It doesn't get better than this.",
+            "God tier running weather.",
+            "If you don't run now, you never will."
+        ]);
     }
 
-    // Fallback
-    return "Your future self will thank you.";
+    // 7. GENERIC / GOOD
+    return pickRandom([
+        "Your future self will thank you.",
+        "Earn that post-run snack.",
+        "Clear head, full lungs, can't lose.",
+        "Just one foot in front of the other.",
+        "Touch grass. Fast."
+    ]);
 }
 
 // --- Calculation ---
@@ -251,6 +303,8 @@ async function calculateRun() {
 
         candidates.sort((a, b) => b.score - a.score);
         const best = candidates[0];
+        
+        // GET RANDOM COMMENT
         const comment = getWittyComment(best, cityNow);
         
         let label = "Top Pick";
