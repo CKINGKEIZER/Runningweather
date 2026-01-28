@@ -28,7 +28,7 @@
         button:hover { background: #e2e8f0; }
         button.active { background: #eff6ff; border-color: var(--secondary); color: var(--secondary); }
         
-        /* Sub Controls (Hidden by default) */
+        /* Sub Controls */
         #sub-controls { display: none; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 15px; animation: fadeIn 0.3s ease; }
         .sub-btn { font-size: 0.8rem; padding: 8px 4px; line-height: 1.3; }
         .sub-time { display: block; font-size: 0.7em; opacity: 0.7; font-weight: normal; }
@@ -37,12 +37,15 @@
 
         button.primary { background: var(--text); color: white; margin-top: 5px; padding: 14px; width: 100%; }
         
-        /* Results */
+        /* Results & Commentary */
         #result-area { margin-top: 20px; display: none; }
         .result-box { background: #f0f9ff; padding: 1.5rem; border-radius: 16px; border: 2px solid var(--secondary); text-align: center; position: relative; }
         .tag { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--secondary); color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; font-weight: bold; text-transform: uppercase; }
         .time { font-size: 2rem; font-weight: 900; color: var(--secondary); margin: 10px 0; }
         .meta { font-size: 0.85rem; color: #64748b; margin-top: 5px; display: flex; justify-content: center; gap: 10px; align-items: center; }
+        
+        /* New Comment Style */
+        .comment { margin-top: 15px; font-size: 0.95rem; font-style: italic; color: #475569; font-weight: 500; border-top: 1px solid #e2e8f0; padding-top: 10px; }
         
         .bmc { display: block; text-align: center; margin-top: 2rem; color: #94a3b8; font-size: 0.8rem; text-decoration: none; }
     </style>
@@ -147,6 +150,43 @@ function setSubMode(sub, btn) {
     btn.classList.add('active');
 }
 
+// --- The Personality Engine ---
+function getWittyComment(best, cityNow) {
+    const diffHours = (best.timeObj - cityNow) / (1000 * 60 * 60);
+    
+    // 1. Is it NOW? (within 1 hour)
+    if (diffHours >= 0 && diffHours < 1.5) {
+        return "Run to your shoes! The window is open NOW.";
+    }
+
+    // 2. Is it raining?
+    if (best.precip > 20) {
+        return "Don't worry, sweat is also wet.";
+    } else if (best.precip > 0) {
+        return "A little drizzle never hurt anyone. Free shower!";
+    }
+
+    // 3. Is it windy?
+    if (best.wind > 25) {
+        return "Headwind builds character. Good luck.";
+    }
+
+    // 4. Is it hot/cold?
+    if (best.temp > 22) {
+        return "It's a warm one. Hydrate or die-drate.";
+    } else if (best.temp < 5) {
+        return "Run fast to stay warm. Frosty!";
+    }
+
+    // 5. Is it perfect? (10C +/- 2, no rain, low wind)
+    if (best.temp >= 8 && best.temp <= 14 && best.precip === 0 && best.wind < 15) {
+        return "Chef's kiss conditions. Literally no excuses.";
+    }
+
+    // Fallback
+    return "Your future self will thank you.";
+}
+
 // --- Calculation ---
 async function calculateRun() {
     const resultArea = document.getElementById('result-area');
@@ -160,29 +200,17 @@ async function calculateRun() {
     resultArea.style.display = 'block';
     resultArea.innerHTML = '<p style="color:#64748b; text-align:center;">Analyzing weather patterns...</p>';
 
-    // Fetch 3 days of data with the city's timezone
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${selectedLat}&longitude=${selectedLon}&hourly=apparent_temperature,precipitation_probability,wind_speed_10m&timezone=${selectedTimezone}&forecast_days=3`;
     
     try {
         const res = await fetch(url);
         const data = await res.json();
-
-        // 1. DETERMINE "NOW" IN THE TARGET CITY
-        // We create a Date object that "looks like" the time in the target city
-        // by converting the current browser time to the target timezone string, 
-        // then parsing it back.
         const cityNow = new Date(new Date().toLocaleString("en-US", { timeZone: selectedTimezone }));
 
         let candidates = data.hourly.time.map((t, i) => {
-            // "t" is the ISO string from API (e.g. "2023-10-27T14:00")
-            // Because we requested &timezone, this string is local to the city.
-            // We parse it into a date object to compare with cityNow.
-            // Note: Both cityNow and this new Date(t) will share the browser's context 
-            // but have the correct relative "face value" for comparison.
             const slotTime = new Date(t);
-            
             return {
-                timeObj: slotTime, // Store for filtering
+                timeObj: slotTime,
                 displayTime: slotTime.toLocaleTimeString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
                 hourVal: slotTime.getHours(),
                 temp: data.hourly.apparent_temperature[i],
@@ -192,36 +220,28 @@ async function calculateRun() {
             };
         });
 
-        // 2. FILTER OUT PAST TIMES
-        // Remove any slot where the time is older than "now" in that city
+        // Filter past times
         candidates = candidates.filter(c => c.timeObj >= cityNow);
 
         if (candidates.length === 0) {
-            resultArea.innerHTML = '<p style="text-align:center;">No upcoming slots found (is it late at night?). Try "Best in 3 Days".</p>';
+            resultArea.innerHTML = '<p style="text-align:center;">No upcoming slots found. Try "Best in 3 Days".</p>';
             return;
         }
 
-        // --- FILTERING MODES ---
+        // Apply Modes
         if (currentMode === 'asap') {
-            // Take the best from the next 24 available hours
             candidates = candidates.slice(0, 24);
         } 
         else if (currentMode === 'tonight') {
-            // Check strictly for "Today" evening in that city
-            // We compare the date string of the slot vs the date string of "now" in that city
             const todayStr = cityNow.toLocaleDateString();
             candidates = candidates.filter(c => {
                 return c.timeObj.toLocaleDateString() === todayStr && c.hourVal >= 17 && c.hourVal < 22;
             });
         }
         else if (currentMode === '3day') {
-            if (currentSubMode === 'morning') {
-                candidates = candidates.filter(c => c.hourVal >= 8 && c.hourVal < 11);
-            } else if (currentSubMode === 'midday') {
-                candidates = candidates.filter(c => c.hourVal >= 11 && c.hourVal < 17);
-            } else if (currentSubMode === 'evening') {
-                candidates = candidates.filter(c => c.hourVal >= 17 && c.hourVal < 22);
-            }
+            if (currentSubMode === 'morning') candidates = candidates.filter(c => c.hourVal >= 8 && c.hourVal < 11);
+            else if (currentSubMode === 'midday') candidates = candidates.filter(c => c.hourVal >= 11 && c.hourVal < 17);
+            else if (currentSubMode === 'evening') candidates = candidates.filter(c => c.hourVal >= 17 && c.hourVal < 22);
         }
 
         if (candidates.length === 0) {
@@ -229,9 +249,9 @@ async function calculateRun() {
             return;
         }
 
-        // Find Winner
         candidates.sort((a, b) => b.score - a.score);
         const best = candidates[0];
+        const comment = getWittyComment(best, cityNow);
         
         let label = "Top Pick";
         if (currentMode === 'tonight') label = "Best Evening Slot";
@@ -246,6 +266,7 @@ async function calculateRun() {
                     <span>💧 ${best.precip}%</span>
                     <span>💨 ${best.wind.toFixed(0)}km/h</span>
                 </div>
+                <div class="comment">"${comment}"</div>
             </div>
             <button onclick="calculateRun()" style="margin-top:10px; background:white; border:1px solid #ddd;">Refresh</button>
         `;
