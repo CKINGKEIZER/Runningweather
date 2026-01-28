@@ -11,6 +11,9 @@
     <meta property="og:description" content="Don't run in the rain. Find the best 60-minute window based on wind, temp, and air quality.">
     <meta property="og:url" content="https://www.runweather.org/">
 
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3361926274971832"
+     crossorigin="anonymous"></script>
+
     <style>
         :root { --primary: #00d2ff; --secondary: #3a7bd5; --accent: #ff9a9e; --bg: #f1f5f9; --text: #1e293b; }
         body { font-family: -apple-system, system-ui, sans-serif; background: linear-gradient(135deg, var(--primary), var(--secondary)); color: var(--text); min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; padding: 20px; box-sizing: border-box; }
@@ -23,14 +26,24 @@
         
         /* SIDEBAR (ADS) */
         .sidebar { width: 160px; display: flex; flex-direction: column; gap: 15px; flex-shrink: 0; }
-        .ad-slot { background: rgba(255, 255, 255, 0.3); border: 2px dashed rgba(255, 255, 255, 0.6); border-radius: 16px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 0.8rem; text-align: center; padding: 10px; min-height: 150px; backdrop-filter: blur(5px); }
+        
+        /* Modified ad-slot to contain real ads cleanly */
+        .ad-slot { 
+            background: rgba(255, 255, 255, 0.1); 
+            border-radius: 16px; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            min-height: 150px; 
+            overflow: hidden; /* Keeps ads inside rounded corners */
+        }
         .ad-slot.tall { min-height: 300px; }
         
         /* Responsive: Drop ads to bottom on small screens */
         @media (max-width: 768px) {
             .wrapper { flex-direction: column; align-items: center; }
             .sidebar { width: 100%; flex-direction: row; justify-content: center; }
-            .ad-slot { width: 100%; min-height: 80px; }
+            .ad-slot { width: 100%; min-height: 100px; }
         }
 
         h1 { margin: 0 0 0.5rem; font-size: 1.5rem; font-weight: 800; text-align: center; }
@@ -127,10 +140,27 @@
 
     <aside class="sidebar">
         <div class="ad-slot">
-            Ad Space<br>(160x150)
+            <ins class="adsbygoogle"
+                 style="display:block"
+                 data-ad-client="ca-pub-3361926274971832"
+                 data-ad-slot="REPLACE_THIS_WITH_AD_SLOT_ID"
+                 data-ad-format="auto"
+                 data-full-width-responsive="true"></ins>
+            <script>
+                 (adsbygoogle = window.adsbygoogle || []).push({});
+            </script>
         </div>
+        
         <div class="ad-slot tall">
-            Ad Space<br>(160x300)
+            <ins class="adsbygoogle"
+                 style="display:block"
+                 data-ad-client="ca-pub-3361926274971832"
+                 data-ad-slot="REPLACE_THIS_WITH_AD_SLOT_ID"
+                 data-ad-format="auto"
+                 data-full-width-responsive="true"></ins>
+            <script>
+                 (adsbygoogle = window.adsbygoogle || []).push({});
+            </script>
         </div>
     </aside>
 </div>
