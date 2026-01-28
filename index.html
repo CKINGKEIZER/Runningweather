@@ -8,26 +8,32 @@
         :root { --primary: #00d2ff; --secondary: #3a7bd5; --accent: #ff9a9e; --bg: #f1f5f9; --text: #1e293b; }
         body { font-family: -apple-system, system-ui, sans-serif; background: linear-gradient(135deg, var(--primary), var(--secondary)); color: var(--text); min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; padding: 20px; box-sizing: border-box; }
         
-        .card { background: white; padding: 2rem; border-radius: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.15); max-width: 440px; width: 100%; position: relative; }
+        .card { background: white; padding: 2rem; border-radius: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.15); max-width: 440px; width: 100%; position: relative; transition: all 0.3s ease; }
         h1 { margin: 0 0 0.5rem; font-size: 1.5rem; font-weight: 800; text-align: center; }
         .subtitle { color: #64748b; margin-bottom: 1.5rem; font-size: 0.9rem; text-align: center; }
 
         /* Autocomplete Styling */
-        .search-container { position: relative; margin-bottom: 1.5rem; }
+        .search-container { position: relative; margin-bottom: 1rem; }
         input { width: 100%; padding: 14px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1rem; outline: none; box-sizing: border-box; }
         input:focus { border-color: var(--secondary); }
         .suggestions { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 12px; max-height: 200px; overflow-y: auto; z-index: 10; box-shadow: 0 10px 20px rgba(0,0,0,0.1); display: none; margin-top: 5px; }
         .suggestion-item { padding: 10px 15px; cursor: pointer; font-size: 0.9rem; border-bottom: 1px solid #f1f5f9; text-align: left; }
         .suggestion-item:hover { background: #f8fafc; color: var(--secondary); }
 
-        /* Action Buttons */
-        .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+        /* Main Controls */
+        .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
         .full-width { grid-column: span 2; }
         
         button { background: #f1f5f9; color: var(--text); border: none; padding: 12px; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 0.9rem; transition: all 0.2s; border: 2px solid transparent; }
         button:hover { background: #e2e8f0; }
         button.active { background: #eff6ff; border-color: var(--secondary); color: var(--secondary); }
-        button.primary { background: var(--text); color: white; margin-top: 10px; padding: 14px; width: 100%; }
+        
+        /* Sub Controls (Hidden by default) */
+        #sub-controls { display: none; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 15px; animation: fadeIn 0.3s ease; }
+        .sub-btn { font-size: 0.8rem; padding: 8px; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+
+        button.primary { background: var(--text); color: white; margin-top: 5px; padding: 14px; width: 100%; }
         
         /* Results */
         #result-area { margin-top: 20px; display: none; }
@@ -35,8 +41,7 @@
         .tag { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--secondary); color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; font-weight: bold; text-transform: uppercase; }
         .time { font-size: 2rem; font-weight: 900; color: var(--secondary); margin: 10px 0; }
         .meta { font-size: 0.85rem; color: #64748b; margin-top: 5px; display: flex; justify-content: center; gap: 10px; align-items: center; }
-        .sunset-badge { background: #fff1f2; color: #e11d48; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }
-
+        
         .bmc { display: block; text-align: center; margin-top: 2rem; color: #94a3b8; font-size: 0.8rem; text-decoration: none; }
     </style>
 </head>
@@ -57,6 +62,12 @@
         <button class="mode-btn full-width" onclick="setMode('3day', this)">📅 Best in 3 Days</button>
     </div>
 
+    <div id="sub-controls">
+        <button class="sub-btn active" onclick="setSubMode('morning', this)">🌅 Morning</button>
+        <button class="sub-btn" onclick="setSubMode('midday', this)">☀️ Midday</button>
+        <button class="sub-btn" onclick="setSubMode('evening', this)">🌆 Evening</button>
+    </div>
+
     <button class="primary" onclick="calculateRun()">Find Best Time</button>
 
     <div id="result-area"></div>
@@ -69,17 +80,18 @@ let selectedLat = null;
 let selectedLon = null;
 let selectedTimezone = null;
 let currentMode = 'asap';
+let currentSubMode = 'morning'; // Default sub-filter
 let debounceTimer;
 
-// --- 1. Autocomplete Logic ---
 const input = document.getElementById('city-input');
 const suggestionsBox = document.getElementById('suggestions');
+const subControls = document.getElementById('sub-controls');
 
+// --- Autocomplete ---
 input.addEventListener('input', (e) => {
     clearTimeout(debounceTimer);
     const query = e.target.value;
     if (query.length < 3) { suggestionsBox.style.display = 'none'; return; }
-    
     debounceTimer = setTimeout(async () => {
         const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${query}&count=5&language=en&format=json`);
         const data = await res.json();
@@ -105,83 +117,104 @@ function selectCity(name, lat, lon, timezone) {
     suggestionsBox.style.display = 'none';
 }
 
-// --- 2. Mode Selection ---
+// --- Mode Logic ---
 function setMode(mode, btn) {
     currentMode = mode;
     document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
+    
+    // Toggle Sub Controls
+    if (mode === '3day') {
+        subControls.style.display = 'grid';
+    } else {
+        subControls.style.display = 'none';
+    }
 }
 
-// --- 3. Core Calculation ---
+function setSubMode(sub, btn) {
+    currentSubMode = sub;
+    document.querySelectorAll('.sub-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+}
+
+// --- Calculation ---
 async function calculateRun() {
     const resultArea = document.getElementById('result-area');
     
     if (!selectedLat) {
         resultArea.style.display = 'block';
-        resultArea.innerHTML = '<p style="color:red; text-align:center;">Please select a city from the list.</p>';
+        resultArea.innerHTML = '<p style="color:red; text-align:center;">Please select a city first.</p>';
         return;
     }
 
     resultArea.style.display = 'block';
     resultArea.innerHTML = '<p style="color:#64748b; text-align:center;">Analyzing weather patterns...</p>';
 
-    // Fetch Weather + Daily Sunset
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${selectedLat}&longitude=${selectedLon}&hourly=apparent_temperature,precipitation_probability,wind_speed_10m&daily=sunset&timezone=${selectedTimezone}&forecast_days=3`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${selectedLat}&longitude=${selectedLon}&hourly=apparent_temperature,precipitation_probability,wind_speed_10m&timezone=${selectedTimezone}&forecast_days=3`;
     
     try {
         const res = await fetch(url);
         const data = await res.json();
-        const sunsetTime = new Date(data.daily.sunset[0]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-        let candidates = data.hourly.time.map((t, i) => ({
-            time: t, // Keep ISO string for comparison
-            displayTime: new Date(t).toLocaleTimeString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
-            hourVal: new Date(t).getHours(),
-            temp: data.hourly.apparent_temperature[i],
-            precip: data.hourly.precipitation_probability[i],
-            wind: data.hourly.wind_speed_10m[i],
-            score: 100 - (Math.abs(data.hourly.apparent_temperature[i] - 10) * 2) - (data.hourly.precipitation_probability[i] * 0.8) - (data.hourly.wind_speed_10m[i] * 0.6)
-        }));
+        let candidates = data.hourly.time.map((t, i) => {
+            const dateObj = new Date(t);
+            return {
+                time: t,
+                displayTime: dateObj.toLocaleTimeString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
+                hourVal: dateObj.getHours(), // 0-23
+                temp: data.hourly.apparent_temperature[i],
+                precip: data.hourly.precipitation_probability[i],
+                wind: data.hourly.wind_speed_10m[i],
+                // Score: Ideal 10°C, 0 rain, low wind
+                score: 100 - (Math.abs(data.hourly.apparent_temperature[i] - 10) * 2) - (data.hourly.precipitation_probability[i] * 0.8) - (data.hourly.wind_speed_10m[i] * 0.6)
+            };
+        });
 
-        // FILTER LOGIC
+        // --- FILTERING ---
         if (currentMode === 'asap') {
-            // Next 24 hours only
             candidates = candidates.slice(0, 24);
         } 
         else if (currentMode === 'tonight') {
-            // Today between 17:00 (5 PM) and 22:00 (10 PM)
-            const todayStr = new Date().toISOString().split('T')[0];
-            candidates = candidates.filter(c => {
-                const cDate = c.time.split('T')[0];
-                return cDate === todayStr && c.hourVal >= 17 && c.hourVal <= 22;
-            });
-            if (candidates.length === 0) {
-                resultArea.innerHTML = '<p style="text-align:center;">Too late for a night run! Try "ASAP" for tomorrow morning.</p>';
-                return;
-            }
+            const todayStr = new Date().toISOString().split('T')[0]; // Simple approx using browser time, ideal is utilizing timezone data but this suffices for "tonight" check
+            // For rigorous "tonight", we check the first 24h slice for hours 17-22
+            candidates = candidates.slice(0, 24).filter(c => c.hourVal >= 17 && c.hourVal <= 22);
         }
         else if (currentMode === '3day') {
-            // All 72 hours are valid, maybe prioritize evenings? 
-            // Let's just give the absolute best score in 3 days.
+            // Apply Sub-Filter
+            if (currentSubMode === 'morning') {
+                candidates = candidates.filter(c => c.hourVal >= 6 && c.hourVal < 11);
+            } else if (currentSubMode === 'midday') {
+                candidates = candidates.filter(c => c.hourVal >= 11 && c.hourVal < 16);
+            } else if (currentSubMode === 'evening') {
+                candidates = candidates.filter(c => c.hourVal >= 16 && c.hourVal < 22);
+            }
+        }
+
+        if (candidates.length === 0) {
+            resultArea.innerHTML = '<p style="text-align:center;">No matching time slots found in this range.</p>';
+            return;
         }
 
         // Find Winner
         candidates.sort((a, b) => b.score - a.score);
         const best = candidates[0];
         
-        const extraInfo = currentMode === 'tonight' ? `<div class="sunset-badge">Sunset: ${sunsetTime}</div>` : '';
+        // Dynamic Label
+        let label = "Top Pick";
+        if (currentMode === 'tonight') label = "Best Evening Slot";
+        if (currentMode === '3day') label = `Best ${currentSubMode.charAt(0).toUpperCase() + currentSubMode.slice(1)} Run`;
 
         resultArea.innerHTML = `
             <div class="result-box">
-                <div class="tag">${currentMode === 'tonight' ? 'Best Evening Slot' : 'Top Pick'}</div>
+                <div class="tag">${label}</div>
                 <div class="time">${best.displayTime}</div>
                 <div class="meta">
                     <span>${best.temp.toFixed(1)}°C</span>
                     <span>💧 ${best.precip}%</span>
                     <span>💨 ${best.wind.toFixed(0)}km/h</span>
                 </div>
-                <div style="margin-top:10px;">${extraInfo}</div>
             </div>
+            <button onclick="calculateRun()" style="margin-top:10px; background:white; border:1px solid #ddd;">Refresh</button>
         `;
 
     } catch (e) {
