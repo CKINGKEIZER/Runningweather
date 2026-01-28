@@ -132,7 +132,7 @@
             </button>
             <button class="sub-btn" onclick="setSubMode('evening', this)">
                 🌆 Evening
-                <span class="sub-time">17:00 - 22:00</span>
+                <span class="sub-time">17:00 - 21:00</span>
             </button>
         </div>
 
@@ -625,13 +625,13 @@ async function calculateRun() {
         else if (currentMode === 'tonight') {
             const todayStr = cityNow.toLocaleDateString();
             candidates = candidates.filter(c => {
-                return c.timeObj.toLocaleDateString() === todayStr && c.hourVal >= 17 && c.hourVal < 22;
+                return c.timeObj.toLocaleDateString() === todayStr && c.hourVal >= 17 && c.hourVal < 21;
             });
         }
         else if (currentMode === '3day') {
             if (currentSubMode === 'morning') candidates = candidates.filter(c => c.hourVal >= 8 && c.hourVal < 11);
             else if (currentSubMode === 'midday') candidates = candidates.filter(c => c.hourVal >= 11 && c.hourVal < 17);
-            else if (currentSubMode === 'evening') candidates = candidates.filter(c => c.hourVal >= 17 && c.hourVal < 22);
+            else if (currentSubMode === 'evening') candidates = candidates.filter(c => c.hourVal >= 17 && c.hourVal < 21);
         }
 
         if (candidates.length === 0) {
