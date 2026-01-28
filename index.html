@@ -21,7 +21,7 @@
 <body>
 <div class="card">
     <h1>Golden Hour</h1>
-    <p class="subtitle">Find the best 60-minute window to run in the next 12 hours.</p>
+    <p class="subtitle">Find the best running window in the next 12 hours.</p>
     <div id="display-area">
         <button onclick="findOptimalWindow()">Find My Window</button>
     </div>
@@ -35,14 +35,12 @@ async function findOptimalWindow() {
     navigator.geolocation.getCurrentPosition(async (pos) => {
         try {
             const { latitude, longitude } = pos.coords;
-            // Using Open-Meteo for free, no-key weather data
             const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&hourly=apparent_temperature,precipitation_probability,wind_speed_10m&forecast_days=1`);
             const data = await res.json();
             const hours = data.hourly.time.slice(0, 12).map((t, i) => {
                 const temp = data.hourly.apparent_temperature[i];
                 const precip = data.hourly.precipitation_probability[i];
                 const wind = data.hourly.wind_speed_10m[i];
-                // Scoring: Ideal is 10°C, low wind, 0% rain
                 let score = 100 - (Math.abs(temp - 10) * 2) - (precip * 0.8) - (wind * 0.6);
                 return { time: new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), temp, precip, wind, score };
             });
