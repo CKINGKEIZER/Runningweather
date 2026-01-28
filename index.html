@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Golden Hour | Running Weather</title>
+    <style>
+        :root { --primary: #00d2ff; --secondary: #3a7bd5; --bg: #f8fafc; --text: #1e293b; }
+        body { font-family: -apple-system, system-ui, sans-serif; background: linear-gradient(135deg, var(--primary), var(--secondary)); color: var(--text); min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; padding: 20px; box-sizing: border-box; }
+        .card { background: white; padding: 2.5rem; border-radius: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.15); max-width: 440px; width: 100%; text-align: center; }
+        h1 { margin: 0 0 0.5rem; font-size: 1.75rem; font-weight: 800; }
+        .subtitle { color: #64748b; margin-bottom: 2rem; font-size: 0.95rem; }
+        #display-area { min-height: 150px; display: flex; flex-direction: column; justify-content: center; }
+        .result-box { background: #f0f9ff; padding: 1.5rem; border-radius: 16px; margin-bottom: 1.5rem; border: 2px solid var(--primary); }
+        .time { font-size: 2.25rem; font-weight: 900; color: var(--secondary); }
+        .stats { font-size: 0.85rem; font-weight: 600; color: #475569; margin-top: 8px; }
+        button { background: var(--text); color: white; border: none; padding: 14px 28px; border-radius: 12px; cursor: pointer; font-weight: 700; width: 100%; }
+        .bmc { margin-top: 2rem; display: inline-block; color: #64748b; text-decoration: none; font-size: 0.8rem; border-top: 1px solid #eee; padding-top: 1rem; width: 100%; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>Golden Hour</h1>
+    <p class="subtitle">Find the best 60-minute window to run in the next 12 hours.</p>
+    <div id="display-area">
+        <button onclick="findOptimalWindow()">Find My Window</button>
+    </div>
+    <a class="bmc" href="https://www.buymeacoffee.com">☕ Buy me a coffee</a>
+</div>
+
+<script>
+async function findOptimalWindow() {
+    const display = document.getElementById('display-area');
+    display.innerHTML = '<p>Analyzing weather data...</p>';
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+        try {
+            const { latitude, longitude } = pos.coords;
+            // Using Open-Meteo for free, no-key weather data
+            const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&hourly=apparent_temperature,precipitation_probability,wind_speed_10m&forecast_days=1`);
+            const data = await res.json();
+            const hours = data.hourly.time.slice(0, 12).map((t, i) => {
+                const temp = data.hourly.apparent_temperature[i];
+                const precip = data.hourly.precipitation_probability[i];
+                const wind = data.hourly.wind_speed_10m[i];
+                // Scoring: Ideal is 10°C, low wind, 0% rain
+                let score = 100 - (Math.abs(temp - 10) * 2) - (precip * 0.8) - (wind * 0.6);
+                return { time: new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), temp, precip, wind, score };
+            });
+            const best = hours.sort((a, b) => b.score - a.score)[0];
+            display.innerHTML = `
+                <div class="result-box">
+                    <div style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: #64748b;">Optimal Start Time</div>
+                    <div class="time">${best.time}</div>
+                    <div class="stats">${best.temp.toFixed(1)}°C | ${best.precip}% Rain | ${best.wind.toFixed(1)} km/h</div>
+                </div>
+                <button onclick="location.reload()">Check Again</button>`;
+        } catch (e) { display.innerHTML = '<p style="color:red">Error loading weather.</p>'; }
+    }, () => { display.innerHTML = '<p>Please enable location.</p>'; });
+}
+</script>
+</body>
+</html>
