@@ -149,19 +149,23 @@
     
     if (routeLayer) map.removeLayer(routeLayer);
 
-    const targetDistanceMeters = parseFloat(document.getElementById('dist-slider').value) * 1000;
-
-    // Adjust points based on distance to improve accuracy
-    let pointCount;
-    if (targetDistanceMeters < 5000) pointCount = 3;
-    else if (targetDistanceMeters < 10000) pointCount = 4;
-    else pointCount = 5; // For longer distances, more points may help
+    const targetKm = parseFloat(document.getElementById('dist-slider').value);
+    const targetDistanceMeters = targetKm * 1000;
+    
+    // Adaptive compensation: request 85-90% of target
+    const compensation = targetKm > 10 ? 0.80 : 0.88;
+    const adjustedDistance = targetDistanceMeters * compensation;
+    
+    // Adaptive point count
+    let pointCount = targetKm < 5 ? 3 : (targetKm < 10 ? 4 : 5);
+    
+    const url = 'https://api.openrouteservice.org/v2/directions/foot-walking/geojson';
 
     const body = {
         coordinates: [[selectedLng, selectedLat]],
         options: {
             round_trip: {
-                length: targetDistanceMeters,
+                length: Math.round(adjustedDistance),
                 points: pointCount,
                 seed: Math.floor(Math.random() * 100)
             }
@@ -186,7 +190,7 @@
         const data = await res.json();
         
         if (!data.features || data.features.length === 0) {
-            throw new Error("Could not find a suitable loop for this distance. Try a different spot.");
+            throw new Error("Could not find a suitable loop. Try a different location.");
         }
 
         routeLayer = L.geoJSON(data, {
@@ -210,6 +214,7 @@
         btn.innerText = "Generate Loop";
     }
 }
+
 
 </script>
 </body>
