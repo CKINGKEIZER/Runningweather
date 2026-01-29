@@ -707,8 +707,70 @@ async function calculateRun() {
     }
 }
 
-// Helper to create data object
+// --- Physiological Scoring Logic ---
+
+function getTempScore(t) {
+    // Optimal: 8°C to 15°C (Ely et al., 2007)
+    // Heat stress (steeper decay): -6 pts per degree > 15°C
+    // Cold stress (gradual decay): -3 pts per degree < 8°C
+    if (t >= 8 && t <= 15) return 100;
+    if (t > 15) return Math.max(0, 100 - (t - 15) * 6); 
+    if (t < 8) return Math.max(0, 100 - (8 - t) * 3);
+    return 0;
+}
+
+function getWindScore(w) {
+    // Davies (1980): Drag increases non-linearly.
+    // < 10km/h: Negligible impact.
+    // > 10km/h: Cubic decay to penalize high winds heavily.
+    if (w < 10) return 100;
+    // Cap penalty to avoid negative numbers before max
+    let penalty = Math.pow(w - 10, 1.3); 
+    return Math.max(0, 100 - penalty);
+}
+
+function getPrecipScore(p) {
+    // Runners tolerate drizzle (<20%) well (cooling effect).
+    // >20%: Linear discomfort.
+    if (p <= 20) return 100;
+    return Math.max(0, 100 - ((p - 20) * 1.5));
+}
+
+function getAqiScore(q) {
+    // European AQI Standards (CAQI)
+    // 0-25: Very Low (Ideal)
+    // >75: High (Health Risk - Hard Penalty)
+    if (q === null) return 100; // Assume good if no data
+    if (q <= 25) return 100;
+    if (q > 75) return 20; // Immediate "Do Not Run" signal
+    // Linear decay between 25 and 75
+    return 100 - ((q - 25) * 1.6);
+}
+
+function calculateWeightedScore(temp, precip, wind, aqi) {
+    const sTemp = getTempScore(temp);
+    const sWind = getWindScore(wind);
+    const sPrecip = getPrecipScore(precip);
+    const sAqi = getAqiScore(aqi);
+
+    // Weighted Average based on impact on performance vs comfort
+    // Temp (40%): Physiological limit
+    // Precip (25%): Comfort/Safety
+    // Wind (20%): Effort cost
+    // AQI (15%): Health (but acts as gate if very low)
+    
+    let total = (sTemp * 0.40) + (sPrecip * 0.25) + (sWind * 0.20) + (sAqi * 0.15);
+
+    // Hard Gate: If AQI is dangerous, cap total score at 40 (Red)
+    if (aqi > 75) total = Math.min(total, 40);
+    
+    return total;
+}
+
+// Updated Helper
 function createCandidate(timeObj, temp, precip, wind, aqi) {
+    const score = calculateWeightedScore(temp, precip, wind, aqi);
+    
     return {
         timeObj: timeObj,
         displayTime: timeObj.toLocaleTimeString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
@@ -717,7 +779,7 @@ function createCandidate(timeObj, temp, precip, wind, aqi) {
         precip: precip,
         wind: wind,
         aqi: aqi,
-        score: 100 - (Math.abs(temp - 10) * 2) - (precip * 0.8) - (wind * 0.6)
+        score: score
     };
 }
 </script>
