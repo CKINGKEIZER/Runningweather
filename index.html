@@ -313,6 +313,10 @@ function selectCity(name, lat, lon, timezone) {
     selectedLon = lon;
     selectedTimezone = timezone;
     suggestionsBox.style.display = 'none';
+    
+    // NEW: Save to LocalStorage
+    const locationData = { name, lat, lon, timezone };
+    localStorage.setItem('userLocation', JSON.stringify(locationData));
 }
 
 // --- Mode Logic ---
@@ -862,7 +866,18 @@ function calculateWeightedScore(temp, precip, wind, aqi) {
     
     return total;
 }
-
+// NEW: Check for saved location on load
+window.addEventListener('load', () => {
+    const saved = localStorage.getItem('userLocation');
+    if (saved) {
+        const data = JSON.parse(saved);
+        // Pre-fill the input and variables
+        input.value = data.name;
+        selectedLat = data.lat;
+        selectedLon = data.lon;
+        selectedTimezone = data.timezone;
+    }
+});
 // Updated Helper
 function createCandidate(timeObj, temp, precip, wind, aqi) {
     const score = calculateWeightedScore(temp, precip, wind, aqi);

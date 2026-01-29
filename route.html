@@ -92,6 +92,29 @@
     map = L.map('map').setView([51.505, -0.09], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
 
+     // 1. Check LocalStorage First
+    const savedLoc = localStorage.getItem('userLocation');
+    
+    if (savedLoc) {
+        const data = JSON.parse(savedLoc);
+        // Set variables
+        selectedLat = data.lat;
+        selectedLng = data.lon; // Note: 'lon' became 'lng' in your route variable
+        
+        // Update Input & Map
+        document.getElementById('city-input').value = data.name;
+        map.setView([selectedLat, selectedLng], 14);
+        setStartPoint(selectedLat, selectedLng);
+        
+    } else if (navigator.geolocation) {
+        // 2. Fallback to Geolocation if no saved city
+        navigator.geolocation.getCurrentPosition(pos => {
+            if(!selectedLat) { // Only if we haven't loaded from storage
+                map.setView([pos.coords.latitude, pos.coords.longitude], 14);
+                setStartPoint(pos.coords.latitude, pos.coords.longitude);
+            }
+        });
+    }
     // Geolocation
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(pos => {
@@ -118,12 +141,18 @@
         }, 300);
     });
 
-    function selectCity(name, lat, lon) {
+        function selectCity(name, lat, lon) {
         input.value = name;
         suggestionsBox.style.display = 'none';
         map.setView([lat, lon], 14);
         setStartPoint(lat, lon);
+        
+        // NEW: Update LocalStorage when city changes here too
+        // (Note: We might not have timezone here, but that's okay for the route page)
+        const locationData = { name, lat, lon, timezone: null }; 
+        localStorage.setItem('userLocation', JSON.stringify(locationData));
     }
+
 
     map.on('click', e => setStartPoint(e.latlng.lat, e.latlng.lng));
 
