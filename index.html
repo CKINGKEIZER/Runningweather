@@ -20,6 +20,8 @@
         
         /* LAYOUT CONTAINER */
         .wrapper { display: flex; gap: 20px; max-width: 700px; width: 100%; align-items: flex-start; }
+
+
         
         /* MAIN CARD */
         .card { background: white; padding: 2rem; border-radius: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.15); flex: 1; position: relative; transition: all 0.3s ease; }
@@ -141,14 +143,15 @@
         <div id="result-area"></div>
         
         <div class="about-section">
-            <h3>About This Tool</h3>
-            <p>
-                Hi! I’m 23 and developed this to replace fragmented weather data. I wanted a singular, 
-        immediate assessment of local running conditions. The model calculates the weighted 
-        interplay between temperature, wind velocity, and air quality to identify the optimal 
-        physiological window. No accounts or paywalls, just the best time to run.
-            </p>
-        </div>
+    <button class="about-toggle" onclick="toggleAbout(this)">
+        About This Tool <span class="arrow">▾</span>
+    </button>
+    <div id="about-content">
+        <p>
+            Hi! I’m 23 and I built this because I got tired of bouncing between weather apps. I just wanted a quick, free way to check running conditions near me in one scan, factoring in temperature, wind, and air quality. No accounts, no paywalls, just the best time to run.
+        </p>
+    </div>
+</div>
 
         <a class="bmc" href="https://buymeacoffee.com/willemscharles" target="_blank">☕ Buy me a coffee</a>
     </div>
@@ -212,6 +215,20 @@ function renderSuggestions(results) {
         </div>`
     ).join('');
     suggestionsBox.style.display = 'block';
+}
+
+// Add inside <script>
+function toggleAbout(btn) {
+    const content = document.getElementById('about-content');
+    const arrow = btn.querySelector('.arrow');
+    
+    if (content.style.display === 'block') {
+        content.style.display = 'none';
+        arrow.classList.remove('rotate');
+    } else {
+        content.style.display = 'block';
+        arrow.classList.add('rotate');
+    }
 }
 
 function selectCity(name, lat, lon, timezone) {
