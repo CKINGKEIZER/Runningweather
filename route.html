@@ -301,11 +301,14 @@ async function generateRoute() {
 
         map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
 
-        const summary = bestRoute.features[0].properties.summary;
+                const summary = bestRoute.features[0].properties.summary;
         const finalDistKm = (summary.distance / 1000).toFixed(2);
-        const finalDurationMin = Math.round(summary.duration / 60);
         
-        stats.innerHTML = `✓ ${finalDistKm} km • ${finalDurationMin} min`;
+        // Calculate running time: (Distance in km / 10 km/h) * 60 minutes
+        const runningTimeMin = Math.round((summary.distance / 1000) / 10 * 60);
+        
+        // Update stats with new format
+        stats.innerHTML = `${finalDistKm} km • ${runningTimeMin}min (10 km/u)`;
 
     } catch (e) {
         console.error("Route Error:", e);
