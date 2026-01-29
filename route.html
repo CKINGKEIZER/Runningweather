@@ -79,10 +79,13 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
 <script>
     // ---------------------------------------------------------
+    // PASTE YOUR "ey..." KEY BELOW
     // ---------------------------------------------------------
-    const API_KEY = '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'; 
+    const API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImY0YmFlNGU0MTI3MDQ4YTNiMmE0YmY5YzQ3OTcwMmM1IiwiaCI6Im11cm11cjY0In0='; 
     // ---------------------------------------------------------
 
     let map, startMarker, routeLayer;
@@ -142,9 +145,7 @@
 
     async function generateRoute() {
         if (!selectedLat) return alert("Click map to set start.");
-        
-        // Validation: Ensure key is not the incorrect Base64 format
-        if (API_KEY.startsWith("ey")) return alert("Invalid Key Format: Please use the raw key starting with '5b3...', not the 'ey...' string.");
+        if (!API_KEY) return alert("Please enter your API Key.");
 
         const btn = document.getElementById('gen-btn');
         const stats = document.getElementById('stats');
@@ -156,22 +157,22 @@
         
         const options = JSON.stringify({ round_trip: { length: dist, points: 3, seed: seed } });
         
-        // CHANGE 1: Move API_KEY to query string to avoid Header/CORS issues
-        const targetUrl = `https://api.openrouteservice.org/v2/directions/foot-walking?start=${selectedLng},${selectedLat}&end=${selectedLng},${selectedLat}&options=${encodeURIComponent(options)}&api_key=${API_KEY}`;
+        // FIX: Pass the 'ey...' key in the URL parameter 'api_key'
+        // This avoids using the Authorization header which causes CORS issues with proxies
+        const targetUrl = `https://api.openrouteservice.org/v2/directions/foot-walking?api_key=${API_KEY}&start=${selectedLng},${selectedLat}&end=${selectedLng},${selectedLat}&options=${encodeURIComponent(options)}`;
         
+        // Use proxy to forward the request
         const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
 
         try {
-            // CHANGE 2: Removed 'headers' object. This makes it a "Simple Request".
+            // Remove 'headers' object to ensure this is treated as a Simple Request
             const res = await fetch(proxyUrl, {
                 method: 'GET'
             });
 
             if (!res.ok) {
                 const txt = await res.text();
-                // 403 Forbidden usually comes from the API itself now
-                if(res.status === 403) throw new Error("Key Invalid or Quota Exceeded.");
-                throw new Error(txt);
+                throw new Error(txt || `Server returned ${res.status}`);
             }
             const data = await res.json();
             if (!data.features) throw new Error("No route found.");
@@ -182,7 +183,6 @@
             const props = data.features[0].properties;
             stats.innerHTML = `${(props.summary.distance/1000).toFixed(2)} km • ${Math.round(props.summary.duration/60)} min`;
         } catch (e) {
-            console.error(e);
             alert("Error: " + e.message);
         } finally {
             btn.disabled = false; btn.innerText = "Generate Loop";
