@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Route Finder | RunWeather</title>
-    
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     
     <style>
@@ -21,119 +20,28 @@
             padding: 20px; 
             box-sizing: border-box; 
         }
-
         .wrapper { max-width: 700px; width: 100%; }
-        
         .card { 
-            background: white; 
-            padding: 1.5rem; 
-            border-radius: 24px; 
+            background: white; padding: 1.5rem; border-radius: 24px; 
             box-shadow: 0 20px 50px rgba(0,0,0,0.15); 
         }
-
         h1 { margin: 0 0 0.5rem; text-align: center; }
         p.subtitle { text-align: center; color: #64748b; margin-bottom: 1.5rem; font-size: 0.9rem; }
-
-        /* SEARCH STYLES */
+        
         .search-container { position: relative; margin-bottom: 1rem; }
-        input[type="text"] { 
-            width: 100%; 
-            padding: 14px; 
-            border: 2px solid #e2e8f0; 
-            border-radius: 12px; 
-            font-size: 1rem; 
-            outline: none; 
-            box-sizing: border-box; 
-        }
-        input[type="text"]:focus { border-color: var(--secondary); }
+        input[type="text"] { width: 100%; padding: 14px; border: 2px solid #e2e8f0; border-radius: 12px; outline: none; box-sizing: border-box; }
+        .suggestions { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 12px; max-height: 200px; overflow-y: auto; z-index: 1000; display: none; margin-top: 5px; }
+        .suggestion-item { padding: 10px 15px; cursor: pointer; border-bottom: 1px solid #f1f5f9; }
         
-        .suggestions { 
-            position: absolute; 
-            top: 100%; left: 0; right: 0; 
-            background: white; 
-            border: 1px solid #e2e8f0; 
-            border-radius: 12px; 
-            max-height: 200px; 
-            overflow-y: auto; 
-            z-index: 1000; 
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1); 
-            display: none; 
-            margin-top: 5px; 
-        }
-        .suggestion-item { 
-            padding: 10px 15px; 
-            cursor: pointer; 
-            font-size: 0.9rem; 
-            border-bottom: 1px solid #f1f5f9; 
-            color: #333; 
-            text-align: left;
-        }
-        .suggestion-item:hover { background: #f8fafc; color: var(--secondary); }
-
-        /* Map Container */
-        #map { 
-            height: 400px; 
-            width: 100%; 
-            border-radius: 16px; 
-            margin-bottom: 1rem; 
-            border: 2px solid #e2e8f0;
-            cursor: crosshair;
-            z-index: 1; /* Lower than suggestions */
-        }
-
-        /* Controls */
-        .controls { 
-            display: grid; 
-            gap: 15px; 
-            margin-bottom: 15px;
-        }
-
-        .control-group {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-        }
-
-        label { font-weight: 600; font-size: 0.9rem; color: var(--secondary); }
+        #map { height: 400px; width: 100%; border-radius: 16px; margin-bottom: 1rem; z-index: 1; }
         
-        input[type="range"] { width: 100%; accent-color: var(--secondary); }
+        .controls { display: grid; gap: 15px; margin-bottom: 15px; }
+        button.action-btn { background: var(--text); color: white; border: none; padding: 14px; border-radius: 10px; font-weight: 600; width: 100%; cursor: pointer; }
+        button.action-btn:disabled { opacity: 0.5; }
         
-        button.action-btn { 
-            background: var(--text); 
-            color: white; 
-            border: none; 
-            padding: 14px; 
-            border-radius: 10px; 
-            font-weight: 600; 
-            width: 100%; 
-            cursor: pointer;
-            font-size: 1rem;
-        }
-        button.action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-        /* Nav Buttons */
-        .nav-buttons {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-top: 20px;
-            padding-top: 20px;
-            border-top: 1px solid #e2e8f0;
-        }
-        .nav-btn {
-            text-decoration: none;
-            padding: 12px;
-            text-align: center;
-            border-radius: 12px;
-            font-weight: 600;
-            font-size: 0.9rem;
-            transition: all 0.2s;
-            background: #f8fafc;
-            color: var(--text);
-            border: 2px solid transparent;
-        }
-        .nav-btn:hover { background: #e2e8f0; }
-        .nav-btn.active { background: #eff6ff; border-color: var(--secondary); color: var(--secondary); }
+        .nav-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; padding-top: 20px; border-top: 1px solid #e2e8f0; }
+        .nav-btn { text-decoration: none; padding: 12px; text-align: center; border-radius: 12px; font-weight: 600; background: #f8fafc; color: var(--text); }
+        .nav-btn.active { background: #eff6ff; color: var(--secondary); }
     </style>
 </head>
 <body>
@@ -151,15 +59,14 @@
         <div id="map"></div>
 
         <div class="controls">
-            <div class="control-group">
-                <label>Distance Goal: <span id="dist-val">5.0</span> km</label>
-                <input type="range" id="dist-slider" min="1" max="21" step="0.5" value="5">
+            <div>
+                <label style="font-weight:600; color:#3a7bd5;">Distance: <span id="dist-val">5.0</span> km</label>
+                <input type="range" id="dist-slider" min="1" max="21" step="0.5" value="5" style="width:100%;">
             </div>
-            
             <button id="gen-btn" class="action-btn" onclick="generateRoute()">Generate Loop</button>
         </div>
 
-        <div id="stats" style="text-align:center; font-weight:bold; color:#64748b; margin-bottom:10px;"></div>
+        <div id="stats" style="text-align:center; font-weight:bold; color:#64748b;"></div>
 
         <div class="nav-buttons">
             <a href="index.html" class="nav-btn">Time Planner</a>
@@ -170,65 +77,46 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-
 <script>
-    // --- API CONFIGURATION ---
+    // ---------------------------------------------------------
+    // 1. PASTE YOUR KEY BELOW. IT SHOULD START WITH "ey..."
+    // ---------------------------------------------------------
     const API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImY0YmFlNGU0MTI3MDQ4YTNiMmE0YmY5YzQ3OTcwMmM1IiwiaCI6Im11cm11cjY0In0='; 
-    // -------------------------
+    // ---------------------------------------------------------
 
     let map, startMarker, routeLayer;
-    let selectedLat = null;
-    let selectedLng = null;
+    let selectedLat = null, selectedLng = null;
     let debounceTimer;
-
-    const input = document.getElementById('city-input');
-    const suggestionsBox = document.getElementById('suggestions');
-
-    // 1. Initialize Map
+    
+    // Init Map
     map = L.map('map').setView([51.505, -0.09], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
 
-    // 2. Geolocation
+    // Geolocation
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(pos => {
-            if (!selectedLat) {
+            if(!selectedLat) {
                 map.setView([pos.coords.latitude, pos.coords.longitude], 14);
                 setStartPoint(pos.coords.latitude, pos.coords.longitude);
             }
         });
     }
 
-    // 3. Autocomplete Logic
+    // Search
+    const input = document.getElementById('city-input');
+    const suggestionsBox = document.getElementById('suggestions');
     input.addEventListener('input', (e) => {
         clearTimeout(debounceTimer);
-        const query = e.target.value;
-        if (query.length < 3) { suggestionsBox.style.display = 'none'; return; }
-        
+        if (e.target.value.length < 3) { suggestionsBox.style.display = 'none'; return; }
         debounceTimer = setTimeout(async () => {
-            const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${query}&count=5&language=en&format=json`);
+            const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${e.target.value}&count=5&language=en&format=json`);
             const data = await res.json();
-            renderSuggestions(data.results);
+            suggestionsBox.innerHTML = data.results ? data.results.map(p => 
+                `<div class="suggestion-item" onclick="selectCity('${p.name}', ${p.latitude}, ${p.longitude})"><strong>${p.name}</strong>, ${p.country}</div>`
+            ).join('') : '';
+            suggestionsBox.style.display = 'block';
         }, 300);
     });
-
-    function renderSuggestions(results) {
-        if (!results) return;
-        suggestionsBox.innerHTML = results.map(place => 
-            `<div class="suggestion-item" onclick="selectCity('${place.name}', ${place.latitude}, ${place.longitude})">
-                <strong>${place.name}</strong>, ${place.country}
-            </div>`
-        ).join('');
-        suggestionsBox.style.display = 'block';
-    }
 
     function selectCity(name, lat, lon) {
         input.value = name;
@@ -237,103 +125,67 @@
         setStartPoint(lat, lon);
     }
 
-    // 4. Map Interactions
-    map.on('click', function(e) {
-        setStartPoint(e.latlng.lat, e.latlng.lng);
-    });
+    map.on('click', e => setStartPoint(e.latlng.lat, e.latlng.lng));
 
     function setStartPoint(lat, lng) {
-        selectedLat = lat;
-        selectedLng = lng;
-
+        selectedLat = lat; selectedLng = lng;
         if (startMarker) map.removeLayer(startMarker);
-        
-        startMarker = L.marker([lat, lng], {draggable: true}).addTo(map);
-        startMarker.bindPopup("Start Here").openPopup();
-
-        startMarker.on('dragend', function(event) {
-            const position = event.target.getLatLng();
-            selectedLat = position.lat;
-            selectedLng = position.lng;
-        });
-
+        startMarker = L.marker([lat, lng], {draggable:true}).addTo(map);
         if (routeLayer) map.removeLayer(routeLayer);
         document.getElementById('stats').innerText = "";
     }
 
-    // 5. Slider
-    document.getElementById('dist-slider').addEventListener('input', (e) => {
+    document.getElementById('dist-slider').addEventListener('input', e => {
         document.getElementById('dist-val').innerText = parseFloat(e.target.value).toFixed(1);
     });
 
-    // 6. Generate Route (GET Request Version - Mobile Friendly)
     async function generateRoute() {
-        if (!selectedLat) { alert("Please click the map to set a start point."); return; }
+        if (!selectedLat) return alert("Click map to set start.");
+        if (!API_KEY.startsWith("ey")) return alert("Please paste the Basic Key (starts with ey...)");
 
         const btn = document.getElementById('gen-btn');
         const stats = document.getElementById('stats');
-        
-        btn.disabled = true;
-        btn.innerText = "Calculating...";
-        stats.innerText = "";
-
+        btn.disabled = true; btn.innerText = "Calculating...";
         if (routeLayer) map.removeLayer(routeLayer);
 
-        const distMeters = parseFloat(document.getElementById('dist-slider').value) * 1000;
+        const dist = parseFloat(document.getElementById('dist-slider').value) * 1000;
         const seed = Math.floor(Math.random() * 100);
-
-        // Construct GET Parameters
-        const options = JSON.stringify({
-            round_trip: {
-                length: distMeters,
-                points: 3,
-                seed: seed
-            }
-        });
-
-        // Use standard GET URL instead of POST
-        // Format: start=lng,lat & end=lng,lat (Start/End must be same for roundtrip logic in GET)
-        const baseUrl = `https://api.openrouteservice.org/v2/directions/foot-walking`;
-        const queryParams = `?api_key=${API_KEY}&start=${selectedLng},${selectedLat}&end=${selectedLng},${selectedLat}&options=${encodeURIComponent(options)}`;
         
-        const targetUrl = baseUrl + queryParams;
+        // Setup Params
+        const options = JSON.stringify({ round_trip: { length: dist, points: 3, seed: seed } });
+        // NOTE: We do NOT put the API key in the URL. We send it in the Header.
+        const targetUrl = `https://api.openrouteservice.org/v2/directions/foot-walking?start=${selectedLng},${selectedLat}&end=${selectedLng},${selectedLat}&options=${encodeURIComponent(options)}`;
         const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
 
         try {
-            const response = await fetch(proxyUrl);
-
-            if (!response.ok) {
-                if (response.status === 403 || response.status === 401) {
-                    throw new Error("API Key Invalid. Please check your OpenRouteService dashboard.");
+            // Send Key in Header
+            const res = await fetch(proxyUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': API_KEY, // Sending the ey... key here
+                    'Content-Type': 'application/json'
                 }
-                const errText = await response.text();
-                throw new Error(`Server Error ${response.status}: ${errText}`);
-            }
+            });
 
-            const data = await response.json();
-            
-            if (!data.features || data.features.length === 0) {
-                 throw new Error("No route found. Try a different start point.");
+            if (!res.ok) {
+                const txt = await res.text();
+                if(res.status === 403) throw new Error("Key Disallowed! Check 'Referrer' setting on Dashboard.");
+                throw new Error(txt);
             }
+            const data = await res.json();
+            if (!data.features) throw new Error("No route found.");
 
-            routeLayer = L.geoJSON(data, {
-                style: { color: '#3a7bd5', weight: 5, opacity: 0.7 }
-            }).addTo(map);
-            
+            routeLayer = L.geoJSON(data, { style: { color: '#3a7bd5', weight: 5, opacity: 0.7 } }).addTo(map);
             map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
-
+            
             const props = data.features[0].properties;
-            stats.innerHTML = `Route: ${(props.summary.distance / 1000).toFixed(2)} km <br> Est. Walking: ${Math.round(props.summary.duration / 60)} min`;
-
-        } catch (error) {
-            console.error(error);
-            alert("Error: " + error.message);
+            stats.innerHTML = `${(props.summary.distance/1000).toFixed(2)} km • ${Math.round(props.summary.duration/60)} min`;
+        } catch (e) {
+            alert("Error: " + e.message);
         } finally {
-            btn.disabled = false;
-            btn.innerText = "Generate Loop";
+            btn.disabled = false; btn.innerText = "Generate Loop";
         }
     }
 </script>
-
 </body>
 </html>
