@@ -176,6 +176,8 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
 <script>
     // --- API CONFIGURATION ---
     const API_KEY = '1d9dab904b9f3f53a9c3f5182f09e956nU6hpMh08zo'; 
@@ -264,7 +266,7 @@
         document.getElementById('dist-val').innerText = parseFloat(e.target.value).toFixed(1);
     });
 
-    // 6. Generate Route (PROXY ENABLED)
+    // 6. Generate Route (GET Request Version - Mobile Friendly)
     async function generateRoute() {
         if (!selectedLat) { alert("Please click the map to set a start point."); return; }
 
@@ -280,32 +282,27 @@
         const distMeters = parseFloat(document.getElementById('dist-slider').value) * 1000;
         const seed = Math.floor(Math.random() * 100);
 
-        // API URL (with Key in URL)
-        const targetUrl = `https://api.openrouteservice.org/v2/directions/foot-walking/geojson?api_key=${API_KEY}`;
+        // Construct GET Parameters
+        const options = JSON.stringify({
+            round_trip: {
+                length: distMeters,
+                points: 3,
+                seed: seed
+            }
+        });
+
+        // Use standard GET URL instead of POST
+        // Format: start=lng,lat & end=lng,lat (Start/End must be same for roundtrip logic in GET)
+        const baseUrl = `https://api.openrouteservice.org/v2/directions/foot-walking`;
+        const queryParams = `?api_key=${API_KEY}&start=${selectedLng},${selectedLat}&end=${selectedLng},${selectedLat}&options=${encodeURIComponent(options)}`;
         
-        // Proxy URL (Bypasses Browser Security)
+        const targetUrl = baseUrl + queryParams;
         const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
 
         try {
-            const response = await fetch(proxyUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    coordinates: [[selectedLng, selectedLat]],
-                    options: {
-                        round_trip: {
-                            length: distMeters,
-                            points: 3,
-                            seed: seed
-                        }
-                    }
-                })
-            });
+            const response = await fetch(proxyUrl);
 
             if (!response.ok) {
-                // If proxy works but API rejects (e.g. invalid key)
                 if (response.status === 403 || response.status === 401) {
                     throw new Error("API Key Invalid. Please check your OpenRouteService dashboard.");
                 }
@@ -315,9 +312,8 @@
 
             const data = await response.json();
             
-            // Validate route existence
             if (!data.features || data.features.length === 0) {
-                 throw new Error("No route found. Try a different location (avoid water).");
+                 throw new Error("No route found. Try a different start point.");
             }
 
             routeLayer = L.geoJSON(data, {
