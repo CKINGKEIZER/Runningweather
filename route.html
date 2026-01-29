@@ -77,13 +77,9 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-
 <script>
     // ---------------------------------------------------------
-    // RESTORED KEY (Base64 Format)
+    // YOUR KEY
     // ---------------------------------------------------------
     const API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImY0YmFlNGU0MTI3MDQ4YTNiMmE0YmY5YzQ3OTcwMmM1IiwiaCI6Im11cm11cjY0In0='; 
     // ---------------------------------------------------------
@@ -145,7 +141,8 @@
 
     async function generateRoute() {
         if (!selectedLat) return alert("Click map to set start.");
-        
+        if (!API_KEY) return alert("API Key is missing.");
+
         const btn = document.getElementById('gen-btn');
         const stats = document.getElementById('stats');
         btn.disabled = true; btn.innerText = "Calculating...";
@@ -154,20 +151,23 @@
         const dist = parseFloat(document.getElementById('dist-slider').value) * 1000;
         const seed = Math.floor(Math.random() * 100);
         
-        // Use encodeURIComponent on the key just in case, though usually not needed for Base64
-        const options = JSON.stringify({ round_trip: { length: dist, points: 3, seed: seed } });
+        // 1. Build Parameters
+        const options = JSON.stringify({ 
+            round_trip: { length: dist, points: 3, seed: seed } 
+        });
+
+        // 2. Build URL 
+        // We pass the key in the URL parameter 'api_key' to ensure CORS works for GET requests
         const targetUrl = `https://api.openrouteservice.org/v2/directions/foot-walking?api_key=${API_KEY}&start=${selectedLng},${selectedLat}&end=${selectedLng},${selectedLat}&options=${encodeURIComponent(options)}`;
 
         try {
+            // 3. Fetch
             const res = await fetch(targetUrl, { method: 'GET' });
 
             if (!res.ok) {
-                let errorMsg = `Server returned ${res.status}`;
-                try {
-                    const errData = await res.json();
-                    if (errData.error) errorMsg = JSON.stringify(errData.error);
-                } catch(e) {}
-                throw new Error(errorMsg);
+                // If the server rejects the key, it will say so here
+                const errData = await res.json();
+                throw new Error(errData.error ? JSON.stringify(errData.error) : `Server error: ${res.status}`);
             }
 
             const data = await res.json();
@@ -180,11 +180,7 @@
             stats.innerHTML = `${(props.summary.distance/1000).toFixed(2)} km • ${Math.round(props.summary.duration/60)} min`;
         } catch (e) {
             console.error(e);
-            if (e.message.includes("Failed to fetch")) {
-                alert("Connection Failed. You are likely running this file directly (file://). You MUST run this on a local server (http://localhost).");
-            } else {
-                alert("Error: " + e.message);
-            }
+            alert("Error: " + e.message);
         } finally {
             btn.disabled = false; btn.innerText = "Generate Loop";
         }
