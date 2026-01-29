@@ -18,7 +18,37 @@
         :root { --primary: #00d2ff; --secondary: #3a7bd5; --accent: #ff9a9e; --bg: #f1f5f9; --text: #1e293b; }
         body { font-family: -apple-system, system-ui, sans-serif; background: linear-gradient(135deg, var(--primary), var(--secondary)); color: var(--text); min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; padding: 20px; box-sizing: border-box; }
         
-        
+        /* NAVIGATION BUTTONS */
+        .nav-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e2e8f0;
+        }
+        .nav-btn {
+            text-decoration: none;
+            padding: 12px;
+            text-align: center;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+            background: #f8fafc;
+            color: var(--text);
+            border: 2px solid transparent;
+        }
+        .nav-btn:hover {
+            background: #e2e8f0;
+        }
+        /* Active state for current page */
+        .nav-btn.active {
+            background: #eff6ff;
+            border-color: var(--secondary);
+            color: var(--secondary);
+        }
+
         /* LAYOUT CONTAINER */
         .wrapper { display: flex; gap: 20px; max-width: 700px; width: 100%; align-items: flex-start; }
 
@@ -195,7 +225,10 @@
         </p>
     </div>
 </div>
-
+<div class="nav-buttons">
+            <a href="index.html" class="nav-btn active">Time Planner</a>
+            <a href="route.html" class="nav-btn">Route Finder</a>
+        </div>
         <a class="bmc" href="https://buymeacoffee.com/willemscharles" target="_blank">☕ Buy me a coffee</a>
     </div>
 
