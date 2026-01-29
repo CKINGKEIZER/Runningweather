@@ -21,7 +21,34 @@
         /* LAYOUT CONTAINER */
         .wrapper { display: flex; gap: 20px; max-width: 700px; width: 100%; align-items: flex-start; }
 
+        /* Add inside <style> */
+        .about-toggle {
+            background: none; 
+            border: none; 
+            color: var(--secondary); 
+            font-size: 0.9rem; 
+            font-weight: 600; 
+            cursor: pointer; 
+            padding: 0; 
+            display: flex; 
+            align-items: center; 
+            gap: 6px; 
+            margin: 0; /* Align left to match header */
+        }
 
+        .about-toggle:hover { 
+            text-decoration: underline; 
+        }
+
+        /* Arrow rotation class */
+        .arrow { display: inline-block; transition: transform 0.2s ease; }
+        .rotate { transform: rotate(180deg); }
+
+        #about-content { 
+            display: none; 
+            margin-top: 10px; 
+            animation: fadeIn 0.3s ease; 
+        }
         
         /* MAIN CARD */
         .card { background: white; padding: 2rem; border-radius: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.15); flex: 1; position: relative; transition: all 0.3s ease; }
@@ -217,7 +244,7 @@ function renderSuggestions(results) {
     suggestionsBox.style.display = 'block';
 }
 
-// Add inside <script>
+// About button
 function toggleAbout(btn) {
     const content = document.getElementById('about-content');
     const arrow = btn.querySelector('.arrow');
