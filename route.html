@@ -150,14 +150,19 @@
     if (routeLayer) map.removeLayer(routeLayer);
 
     const targetDistanceMeters = parseFloat(document.getElementById('dist-slider').value) * 1000;
-    const url = 'https://api.openrouteservice.org/v2/directions/foot-walking/geojson';
+
+    // Adjust points based on distance to improve accuracy
+    let pointCount;
+    if (targetDistanceMeters < 5000) pointCount = 3;
+    else if (targetDistanceMeters < 10000) pointCount = 4;
+    else pointCount = 5; // For longer distances, more points may help
 
     const body = {
-        coordinates: [[selectedLng, selectedLat]], // ← FIXED: Only one coordinate pair
+        coordinates: [[selectedLng, selectedLat]],
         options: {
             round_trip: {
                 length: targetDistanceMeters,
-                points: 3,
+                points: pointCount,
                 seed: Math.floor(Math.random() * 100)
             }
         }
