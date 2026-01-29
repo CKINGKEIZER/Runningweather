@@ -144,45 +144,48 @@
     });
 
     async function generateRoute() {
+        // 1. Validation
         if (!selectedLat) return alert("Click map to set start.");
-        if (!API_KEY) return alert("Please enter your API Key.");
+        if (!API_KEY || API_KEY.startsWith('eyJ')) return alert("Invalid API Key format. Use the raw key starting with '5b3ce...'.");
 
         const btn = document.getElementById('gen-btn');
         const stats = document.getElementById('stats');
         btn.disabled = true; btn.innerText = "Calculating...";
+        
         if (routeLayer) map.removeLayer(routeLayer);
 
-        const dist = parseFloat(document.getElementById('dist-slider').value) * 1000;
-        const seed = Math.floor(Math.random() * 100);
-        
-        const options = JSON.stringify({ round_trip: { length: dist, points: 3, seed: seed } });
-        
-        // FIX: Pass the 'ey...' key in the URL parameter 'api_key'
-        // This avoids using the Authorization header which causes CORS issues with proxies
-        const targetUrl = `https://api.openrouteservice.org/v2/directions/foot-walking?api_key=${API_KEY}&start=${selectedLng},${selectedLat}&end=${selectedLng},${selectedLat}&options=${encodeURIComponent(options)}`;
-        
-        // Use proxy to forward the request
-        const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
-
         try {
-            // Remove 'headers' object to ensure this is treated as a Simple Request
-            const res = await fetch(proxyUrl, {
-                method: 'GET'
+            // 2. Prepare Parameters
+            const dist = parseFloat(document.getElementById('dist-slider').value) * 1000;
+            const seed = Math.floor(Math.random() * 100);
+            const options = JSON.stringify({ 
+                round_trip: { length: dist, points: 3, seed: seed } 
             });
 
-            if (!res.ok) {
-                const txt = await res.text();
-                throw new Error(txt || `Server returned ${res.status}`);
-            }
-            const data = await res.json();
-            if (!data.features) throw new Error("No route found.");
+            // 3. Construct URL (Direct to OpenRouteService)
+            // Note: Key is passed in URL to avoid Header-based CORS triggers
+            const targetUrl = `https://api.openrouteservice.org/v2/directions/foot-walking?api_key=${API_KEY}&start=${selectedLng},${selectedLat}&end=${selectedLng},${selectedLat}&options=${encodeURIComponent(options)}`;
 
+            // 4. Fetch Data
+            const res = await fetch(targetUrl, { method: 'GET' });
+
+            if (!res.ok) {
+                const errorData = await res.json();
+                throw new Error(errorData.error ? errorData.error.message : `API returned ${res.status}`);
+            }
+
+            const data = await res.json();
+            if (!data.features || data.features.length === 0) throw new Error("No route found. Try adjusting the distance.");
+
+            // 5. Render Route
             routeLayer = L.geoJSON(data, { style: { color: '#3a7bd5', weight: 5, opacity: 0.7 } }).addTo(map);
             map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
             
             const props = data.features[0].properties;
             stats.innerHTML = `${(props.summary.distance/1000).toFixed(2)} km • ${Math.round(props.summary.duration/60)} min`;
+
         } catch (e) {
+            console.error(e);
             alert("Error: " + e.message);
         } finally {
             btn.disabled = false; btn.innerText = "Generate Loop";
