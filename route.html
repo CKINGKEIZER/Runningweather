@@ -77,9 +77,10 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
 <script>
     // ---------------------------------------------------------
-    // 1. PASTE YOUR KEY BELOW. IT SHOULD START WITH "ey..."
     // ---------------------------------------------------------
     const API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImY0YmFlNGU0MTI3MDQ4YTNiMmE0YmY5YzQ3OTcwMmM1IiwiaCI6Im11cm11cjY0In0='; 
     // ---------------------------------------------------------
@@ -141,7 +142,9 @@
 
     async function generateRoute() {
         if (!selectedLat) return alert("Click map to set start.");
-        if (!API_KEY.startsWith("ey")) return alert("Please paste the Basic Key (starts with ey...)");
+        
+        // Validation: Ensure key is not the incorrect Base64 format
+        if (API_KEY.startsWith("ey")) return alert("Invalid Key Format: Please use the raw key starting with '5b3...', not the 'ey...' string.");
 
         const btn = document.getElementById('gen-btn');
         const stats = document.getElementById('stats');
@@ -151,25 +154,23 @@
         const dist = parseFloat(document.getElementById('dist-slider').value) * 1000;
         const seed = Math.floor(Math.random() * 100);
         
-        // Setup Params
         const options = JSON.stringify({ round_trip: { length: dist, points: 3, seed: seed } });
-        // NOTE: We do NOT put the API key in the URL. We send it in the Header.
-        const targetUrl = `https://api.openrouteservice.org/v2/directions/foot-walking?start=${selectedLng},${selectedLat}&end=${selectedLng},${selectedLat}&options=${encodeURIComponent(options)}`;
+        
+        // CHANGE 1: Move API_KEY to query string to avoid Header/CORS issues
+        const targetUrl = `https://api.openrouteservice.org/v2/directions/foot-walking?start=${selectedLng},${selectedLat}&end=${selectedLng},${selectedLat}&options=${encodeURIComponent(options)}&api_key=${API_KEY}`;
+        
         const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
 
         try {
-            // Send Key in Header
+            // CHANGE 2: Removed 'headers' object. This makes it a "Simple Request".
             const res = await fetch(proxyUrl, {
-                method: 'GET',
-                headers: {
-                    'Authorization': API_KEY, // Sending the ey... key here
-                    'Content-Type': 'application/json'
-                }
+                method: 'GET'
             });
 
             if (!res.ok) {
                 const txt = await res.text();
-                if(res.status === 403) throw new Error("Key Disallowed! Check 'Referrer' setting on Dashboard.");
+                // 403 Forbidden usually comes from the API itself now
+                if(res.status === 403) throw new Error("Key Invalid or Quota Exceeded.");
                 throw new Error(txt);
             }
             const data = await res.json();
@@ -181,6 +182,7 @@
             const props = data.features[0].properties;
             stats.innerHTML = `${(props.summary.distance/1000).toFixed(2)} km • ${Math.round(props.summary.duration/60)} min`;
         } catch (e) {
+            console.error(e);
             alert("Error: " + e.message);
         } finally {
             btn.disabled = false; btn.innerText = "Generate Loop";
