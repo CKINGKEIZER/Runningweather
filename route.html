@@ -83,7 +83,7 @@
 
 <script>
     // ---------------------------------------------------------
-    // PASTE YOUR "ey..." KEY BELOW
+    // RESTORED KEY (Base64 Format)
     // ---------------------------------------------------------
     const API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImY0YmFlNGU0MTI3MDQ4YTNiMmE0YmY5YzQ3OTcwMmM1IiwiaCI6Im11cm11cjY0In0='; 
     // ---------------------------------------------------------
@@ -144,49 +144,47 @@
     });
 
     async function generateRoute() {
-        // 1. Validation
         if (!selectedLat) return alert("Click map to set start.");
-        if (!API_KEY || API_KEY.startsWith('eyJ')) return alert("Invalid API Key format. Use the raw key starting with '5b3ce...'.");
-
+        
         const btn = document.getElementById('gen-btn');
         const stats = document.getElementById('stats');
         btn.disabled = true; btn.innerText = "Calculating...";
-        
         if (routeLayer) map.removeLayer(routeLayer);
 
+        const dist = parseFloat(document.getElementById('dist-slider').value) * 1000;
+        const seed = Math.floor(Math.random() * 100);
+        
+        // Use encodeURIComponent on the key just in case, though usually not needed for Base64
+        const options = JSON.stringify({ round_trip: { length: dist, points: 3, seed: seed } });
+        const targetUrl = `https://api.openrouteservice.org/v2/directions/foot-walking?api_key=${API_KEY}&start=${selectedLng},${selectedLat}&end=${selectedLng},${selectedLat}&options=${encodeURIComponent(options)}`;
+
         try {
-            // 2. Prepare Parameters
-            const dist = parseFloat(document.getElementById('dist-slider').value) * 1000;
-            const seed = Math.floor(Math.random() * 100);
-            const options = JSON.stringify({ 
-                round_trip: { length: dist, points: 3, seed: seed } 
-            });
-
-            // 3. Construct URL (Direct to OpenRouteService)
-            // Note: Key is passed in URL to avoid Header-based CORS triggers
-            const targetUrl = `https://api.openrouteservice.org/v2/directions/foot-walking?api_key=${API_KEY}&start=${selectedLng},${selectedLat}&end=${selectedLng},${selectedLat}&options=${encodeURIComponent(options)}`;
-
-            // 4. Fetch Data
             const res = await fetch(targetUrl, { method: 'GET' });
 
             if (!res.ok) {
-                const errorData = await res.json();
-                throw new Error(errorData.error ? errorData.error.message : `API returned ${res.status}`);
+                let errorMsg = `Server returned ${res.status}`;
+                try {
+                    const errData = await res.json();
+                    if (errData.error) errorMsg = JSON.stringify(errData.error);
+                } catch(e) {}
+                throw new Error(errorMsg);
             }
 
             const data = await res.json();
-            if (!data.features || data.features.length === 0) throw new Error("No route found. Try adjusting the distance.");
+            if (!data.features) throw new Error("No route found.");
 
-            // 5. Render Route
             routeLayer = L.geoJSON(data, { style: { color: '#3a7bd5', weight: 5, opacity: 0.7 } }).addTo(map);
             map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
             
             const props = data.features[0].properties;
             stats.innerHTML = `${(props.summary.distance/1000).toFixed(2)} km • ${Math.round(props.summary.duration/60)} min`;
-
         } catch (e) {
             console.error(e);
-            alert("Error: " + e.message);
+            if (e.message.includes("Failed to fetch")) {
+                alert("Connection Failed. You are likely running this file directly (file://). You MUST run this on a local server (http://localhost).");
+            } else {
+                alert("Error: " + e.message);
+            }
         } finally {
             btn.disabled = false; btn.innerText = "Generate Loop";
         }
