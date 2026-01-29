@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RunWeather | Golden Hour Running Planner</title>
+    <title>Run Planner & Weather Forecast | RunWeather</title>
     
-    <meta name="description" content="Stop guessing. AI-powered weather analysis to find the perfect running window in your city.">
+    <meta name="description" content="Plan your runs based on real-time weather data. Our run planner adjusts your schedule for temperature, wind, and precipitation to optimize performance.">>
     <meta property="og:type" content="website">
     <meta property="og:title" content="Golden Hour | Find Your Perfect Run">
     <meta property="og:description" content="Don't run in the rain. Find the best 60-minute window based on wind, temp, and air quality.">
@@ -17,6 +17,7 @@
     <style>
         :root { --primary: #00d2ff; --secondary: #3a7bd5; --accent: #ff9a9e; --bg: #f1f5f9; --text: #1e293b; }
         body { font-family: -apple-system, system-ui, sans-serif; background: linear-gradient(135deg, var(--primary), var(--secondary)); color: var(--text); min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; padding: 20px; box-sizing: border-box; }
+        
         
         /* LAYOUT CONTAINER */
         .wrapper { display: flex; gap: 20px; max-width: 700px; width: 100%; align-items: flex-start; }
@@ -131,6 +132,21 @@
 
         .bmc { display: block; text-align: center; margin-top: 1rem; color: #94a3b8; font-size: 0.8rem; text-decoration: none; }
     </style>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "RunWeather Run Planner",
+      "applicationCategory": "HealthApplication",
+      "operatingSystem": "Web",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "description": "A weather-based run planner that analyzes wind, temperature, and precipitation to find the optimal time to run."
+    }
+    </script>
 </head>
 <body>
 
