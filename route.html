@@ -34,6 +34,42 @@
         h1 { margin: 0 0 0.5rem; text-align: center; }
         p.subtitle { text-align: center; color: #64748b; margin-bottom: 1.5rem; font-size: 0.9rem; }
 
+        /* SEARCH STYLES */
+        .search-container { position: relative; margin-bottom: 1rem; }
+        input[type="text"] { 
+            width: 100%; 
+            padding: 14px; 
+            border: 2px solid #e2e8f0; 
+            border-radius: 12px; 
+            font-size: 1rem; 
+            outline: none; 
+            box-sizing: border-box; 
+        }
+        input[type="text"]:focus { border-color: var(--secondary); }
+        
+        .suggestions { 
+            position: absolute; 
+            top: 100%; left: 0; right: 0; 
+            background: white; 
+            border: 1px solid #e2e8f0; 
+            border-radius: 12px; 
+            max-height: 200px; 
+            overflow-y: auto; 
+            z-index: 1000; 
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1); 
+            display: none; 
+            margin-top: 5px; 
+        }
+        .suggestion-item { 
+            padding: 10px 15px; 
+            cursor: pointer; 
+            font-size: 0.9rem; 
+            border-bottom: 1px solid #f1f5f9; 
+            color: #333; 
+            text-align: left;
+        }
+        .suggestion-item:hover { background: #f8fafc; color: var(--secondary); }
+
         /* Map Container */
         #map { 
             height: 400px; 
@@ -41,7 +77,8 @@
             border-radius: 16px; 
             margin-bottom: 1rem; 
             border: 2px solid #e2e8f0;
-            cursor: crosshair; /* Indicates they should click */
+            cursor: crosshair;
+            z-index: 1; /* Lower than suggestions */
         }
 
         /* Controls */
@@ -61,13 +98,6 @@
         
         input[type="range"] { width: 100%; accent-color: var(--secondary); }
         
-        .dist-display { 
-            font-size: 1.2rem; 
-            font-weight: 800; 
-            color: var(--text); 
-            text-align: center;
-        }
-
         button.action-btn { 
             background: var(--text); 
             color: white; 
@@ -81,7 +111,7 @@
         }
         button.action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-        /* Nav Buttons (Consistent with Index) */
+        /* Nav Buttons */
         .nav-buttons {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -111,7 +141,12 @@
 <div class="wrapper">
     <div class="card">
         <h1>Route Finder</h1>
-        <p class="subtitle">Click map to set start point. Select distance.</p>
+        <p class="subtitle">Search city. Set start point. Generate loop.</p>
+
+        <div class="search-container">
+            <input type="text" id="city-input" placeholder="Search city (e.g. London)" autocomplete="off">
+            <div id="suggestions" class="suggestions"></div>
+        </div>
 
         <div id="map"></div>
 
@@ -137,32 +172,67 @@
 
 <script>
     // --- CONFIGURATION ---
-   const API_KEY = '1d9dab904b9f3f53a9c3f5182f09e956nU6hpMh08zo'; // <--- PASTE KEY HERE
+    const API_KEY = 'YOUR_VALID_API_KEY_HERE'; // <--- PASTE NEW KEY HERE
     // ---------------------
 
     let map, startMarker, routeLayer;
     let selectedLat = null;
     let selectedLng = null;
+    let debounceTimer;
+
+    const input = document.getElementById('city-input');
+    const suggestionsBox = document.getElementById('suggestions');
 
     // 1. Initialize Map
-    // Default to a central location (e.g., London) until geolocation runs
     map = L.map('map').setView([51.505, -0.09], 13);
-
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    // 2. Try to get user location immediately
+    // 2. Geolocation on Load
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(pos => {
-            const lat = pos.coords.latitude;
-            const lng = pos.coords.longitude;
-            map.setView([lat, lng], 14);
-            setStartPoint(lat, lng);
+            // Only center if user hasn't already searched
+            if (!selectedLat) {
+                map.setView([pos.coords.latitude, pos.coords.longitude], 14);
+                setStartPoint(pos.coords.latitude, pos.coords.longitude);
+            }
         });
     }
 
-    // 3. Map Click Listener
+    // 3. Autocomplete Logic (Same as Index)
+    input.addEventListener('input', (e) => {
+        clearTimeout(debounceTimer);
+        const query = e.target.value;
+        if (query.length < 3) { suggestionsBox.style.display = 'none'; return; }
+        
+        debounceTimer = setTimeout(async () => {
+            const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${query}&count=5&language=en&format=json`);
+            const data = await res.json();
+            renderSuggestions(data.results);
+        }, 300);
+    });
+
+    function renderSuggestions(results) {
+        if (!results) return;
+        suggestionsBox.innerHTML = results.map(place => 
+            `<div class="suggestion-item" onclick="selectCity('${place.name}', ${place.latitude}, ${place.longitude})">
+                <strong>${place.name}</strong>, ${place.country}
+            </div>`
+        ).join('');
+        suggestionsBox.style.display = 'block';
+    }
+
+    function selectCity(name, lat, lon) {
+        input.value = name;
+        suggestionsBox.style.display = 'none';
+        
+        // Move Map
+        map.setView([lat, lon], 14);
+        setStartPoint(lat, lon);
+    }
+
+    // 4. Map Click & Marker Logic
     map.on('click', function(e) {
         setStartPoint(e.latlng.lat, e.latlng.lng);
     });
@@ -171,36 +241,30 @@
         selectedLat = lat;
         selectedLng = lng;
 
-        // Remove old marker
         if (startMarker) map.removeLayer(startMarker);
         
-        // Add new marker
         startMarker = L.marker([lat, lng], {draggable: true}).addTo(map);
         startMarker.bindPopup("Start Here").openPopup();
 
-        // Update when dragged
         startMarker.on('dragend', function(event) {
             const position = event.target.getLatLng();
             selectedLat = position.lat;
             selectedLng = position.lng;
         });
 
-        // Clear previous route if exists
         if (routeLayer) map.removeLayer(routeLayer);
         document.getElementById('stats').innerText = "";
     }
 
-    // 4. Update Slider Text
+    // 5. Slider
     document.getElementById('dist-slider').addEventListener('input', (e) => {
         document.getElementById('dist-val').innerText = parseFloat(e.target.value).toFixed(1);
     });
 
-    // 5. Generate Route
+    // 6. Generate Route
     async function generateRoute() {
-        if (!selectedLat || !API_KEY || API_KEY === 'YOUR_API_KEY_HERE') {
-            alert("Error: Please set a start point and add your API Key in the code.");
-            return;
-        }
+        if (!selectedLat) { alert("Please click the map to set a start point."); return; }
+        if (!API_KEY || API_KEY.length < 10) { alert("Invalid API Key."); return; }
 
         const btn = document.getElementById('gen-btn');
         const stats = document.getElementById('stats');
@@ -211,15 +275,8 @@
 
         if (routeLayer) map.removeLayer(routeLayer);
 
-        const distKm = parseFloat(document.getElementById('dist-slider').value);
-        // ORS expects meters
-        const distMeters = distKm * 1000;
-        
-        // Seed ensures randomness. 
+        const distMeters = parseFloat(document.getElementById('dist-slider').value) * 1000;
         const seed = Math.floor(Math.random() * 100);
-
-        // API Endpoint for Round Trip
-        // Profile: foot-walking (avoids highways, prefers runnable paths)
         const url = `https://api.openrouteservice.org/v2/directions/foot-walking/geojson`;
 
         try {
@@ -234,35 +291,31 @@
                     options: {
                         round_trip: {
                             length: distMeters,
-                            points: 3, // Number of points in the polygon to generate loop
+                            points: 3,
                             seed: seed
                         }
                     }
                 })
             });
 
-            if (!response.ok) throw new Error("API Limit or Error");
+            if (!response.ok) {
+                const errData = await response.json();
+                console.error("API Error Details:", errData);
+                throw new Error("API Error");
+            }
 
             const data = await response.json();
-
-            // Render Route
             routeLayer = L.geoJSON(data, {
                 style: { color: '#3a7bd5', weight: 5, opacity: 0.7 }
             }).addTo(map);
-
-            // Fit map to show full route
             map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
 
-            // Show Stats
             const props = data.features[0].properties;
-            const actualDist = (props.summary.distance / 1000).toFixed(2);
-            const duration = Math.round(props.summary.duration / 60); // minutes
-            
-            stats.innerHTML = `Route: ${actualDist} km <br> Est. Walking: ${duration} min`;
+            stats.innerHTML = `Route: ${(props.summary.distance / 1000).toFixed(2)} km <br> Est. Walking: ${Math.round(props.summary.duration / 60)} min`;
 
         } catch (error) {
             console.error(error);
-            alert("Could not generate route. Ensure API key is valid and start point is on land.");
+            alert("Route generation failed. Check console for details.");
         } finally {
             btn.disabled = false;
             btn.innerText = "Generate Loop";
