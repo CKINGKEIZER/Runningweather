@@ -139,71 +139,144 @@
         document.getElementById('dist-val').innerText = parseFloat(e.target.value).toFixed(1);
     });
 
-    async function generateRoute() {
+    // Helper function to analyze route quality
+function analyzeRouteQuality(coordinates) {
+    if (coordinates.length < 4) return { backtrackScore: 0, valid: true };
+    
+    let backtrackCount = 0;
+    let totalTurns = 0;
+    
+    // Check for direction reversals (backtracking indicator)
+    for (let i = 2; i < coordinates.length; i++) {
+        const [lon1, lat1] = coordinates[i - 2];
+        const [lon2, lat2] = coordinates[i - 1];
+        const [lon3, lat3] = coordinates[i];
+        
+        // Calculate bearing changes
+        const bearing1 = Math.atan2(lon2 - lon1, lat2 - lat1);
+        const bearing2 = Math.atan2(lon3 - lon2, lat3 - lat2);
+        const bearingDiff = Math.abs(bearing2 - bearing1) * (180 / Math.PI);
+        
+        totalTurns++;
+        
+        // 160-180° turns = likely backtracking
+        if (bearingDiff > 160 && bearingDiff < 200) {
+            backtrackCount++;
+        }
+    }
+    
+    const backtrackScore = totalTurns > 0 ? backtrackCount / totalTurns : 0;
+    
+    return {
+        backtrackScore: backtrackScore,
+        backtrackCount: backtrackCount,
+        valid: backtrackScore < 0.15 // Less than 15% sharp reversals
+    };
+}
+
+async function generateRoute() {
     if (!selectedLat) return alert("Click map to set start.");
     
     const btn = document.getElementById('gen-btn');
     const stats = document.getElementById('stats');
     btn.disabled = true; 
-    btn.innerText = "Calculating...";
+    btn.innerText = "Finding best route...";
     
     if (routeLayer) map.removeLayer(routeLayer);
 
     const targetKm = parseFloat(document.getElementById('dist-slider').value);
     const targetDistanceMeters = targetKm * 1000;
     
-    // Adaptive compensation: request 85-90% of target
-    const compensation = targetKm > 10 ? 0.80 : 0.88;
-    const adjustedDistance = targetDistanceMeters * compensation;
-    
-    // Adaptive point count
-    let pointCount = targetKm < 5 ? 3 : (targetKm < 10 ? 4 : 5);
-    
     const url = 'https://api.openrouteservice.org/v2/directions/foot-walking/geojson';
 
-    const body = {
-        coordinates: [[selectedLng, selectedLat]],
-        options: {
-            round_trip: {
-                length: Math.round(adjustedDistance),
-                points: pointCount,
-                seed: Math.floor(Math.random() * 100)
+    let bestRoute = null;
+    let bestScore = Infinity;
+    const maxAttempts = 5; // Try 5 different seeds
+    
+    try {
+        // Try multiple route variations
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            // Strategy 1: Vary the number of points (3-5)
+            const pointCount = 3 + (attempt % 3);
+            
+            // Strategy 2: Vary distance compensation based on point count
+            // More points = need more compensation
+            const compensation = pointCount === 3 ? 0.90 : 
+                                pointCount === 4 ? 0.85 : 0.80;
+            
+            const adjustedDistance = Math.round(targetDistanceMeters * compensation);
+            
+            // Strategy 3: Use different seeds
+            const seed = Math.floor(Math.random() * 1000);
+            
+            const body = {
+                coordinates: [[selectedLng, selectedLat]],
+                options: {
+                    round_trip: {
+                        length: adjustedDistance,
+                        points: pointCount,
+                        seed: seed
+                    }
+                }
+            };
+
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': API_KEY
+                },
+                body: JSON.stringify(body)
+            });
+
+            if (!res.ok) continue; // Skip failed attempts
+            
+            const data = await res.json();
+            
+            if (!data.features || data.features.length === 0) continue;
+            
+            const coords = data.features[0].geometry.coordinates;
+            const summary = data.features[0].properties.summary;
+            const actualDistKm = summary.distance / 1000;
+            
+            // Calculate quality score
+            const quality = analyzeRouteQuality(coords);
+            const distanceError = Math.abs(actualDistKm - targetKm) / targetKm;
+            
+            // Combined score: backtracking penalty + distance accuracy
+            const score = (quality.backtrackScore * 100) + (distanceError * 50);
+            
+            console.log(`Attempt ${attempt + 1}: ${pointCount} points, ${actualDistKm.toFixed(2)}km, backtrack: ${quality.backtrackCount}, score: ${score.toFixed(2)}`);
+            
+            // Keep the best route
+            if (quality.valid && score < bestScore) {
+                bestScore = score;
+                bestRoute = data;
+            }
+            
+            // If we found an excellent route early, stop searching
+            if (quality.backtrackCount === 0 && distanceError < 0.15) {
+                console.log("Found excellent route early!");
+                break;
             }
         }
-    };
-
-    try {
-        const res = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': API_KEY
-            },
-            body: JSON.stringify(body)
-        });
-
-        if (!res.ok) {
-            const errorData = await res.json();
-            throw new Error(errorData.error?.message || `Status: ${res.status}`);
-        }
-
-        const data = await res.json();
         
-        if (!data.features || data.features.length === 0) {
-            throw new Error("Could not find a suitable loop. Try a different location.");
+        if (!bestRoute) {
+            throw new Error("Could not find a suitable loop. Try a different location or distance.");
         }
 
-        routeLayer = L.geoJSON(data, {
+        // Render the best route
+        routeLayer = L.geoJSON(bestRoute, {
             style: { color: '#3a7bd5', weight: 5, opacity: 0.8 }
         }).addTo(map);
 
         map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
 
-        const summary = data.features[0].properties.summary;
+        const summary = bestRoute.features[0].properties.summary;
         const finalDistKm = (summary.distance / 1000).toFixed(2);
         const finalDurationMin = Math.round(summary.duration / 60);
         
-        stats.innerHTML = `${finalDistKm} km • ${finalDurationMin} min`;
+        stats.innerHTML = `✓ ${finalDistKm} km • ${finalDurationMin} min`;
 
     } catch (e) {
         console.error("Route Error:", e);
@@ -214,7 +287,6 @@
         btn.innerText = "Generate Loop";
     }
 }
-
 
 </script>
 </body>
