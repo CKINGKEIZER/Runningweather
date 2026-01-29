@@ -172,11 +172,12 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
 <script>
-    // --- PASTE YOUR KEY HERE CAREFULLY ---
-    // Make sure there are no spaces inside the quotes!
+    // --- API CONFIGURATION ---
     const API_KEY = '1d9dab904b9f3f53a9c3f5182f09e956nU6hpMh08zo'; 
-    // -------------------------------------
+    // -------------------------
 
     let map, startMarker, routeLayer;
     let selectedLat = null;
@@ -192,7 +193,7 @@
         attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    // 2. Geolocation on Load
+    // 2. Geolocation
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(pos => {
             if (!selectedLat) {
@@ -232,7 +233,7 @@
         setStartPoint(lat, lon);
     }
 
-    // 4. Map Click & Marker Logic
+    // 4. Map Interactions
     map.on('click', function(e) {
         setStartPoint(e.latlng.lat, e.latlng.lng);
     });
@@ -261,7 +262,7 @@
         document.getElementById('dist-val').innerText = parseFloat(e.target.value).toFixed(1);
     });
 
-    // 6. Generate Route (DEBUG VERSION)
+    // 6. Generate Route (Standard Version)
     async function generateRoute() {
         if (!selectedLat) { alert("Please click the map to set a start point."); return; }
 
@@ -276,6 +277,7 @@
 
         const distMeters = parseFloat(document.getElementById('dist-slider').value) * 1000;
         const seed = Math.floor(Math.random() * 100);
+        
         const url = `https://api.openrouteservice.org/v2/directions/foot-walking/geojson`;
 
         try {
@@ -297,22 +299,22 @@
                 })
             });
 
-            // --- DEBUG ERROR HANDLING ---
             if (!response.ok) {
                 const errData = await response.json();
-                
-                // 401 = Key Invalid (or spaces in key)
-                // 403 = Account not active yet or Quota exceeded
-                const msg = `API Error ${response.status}: ${JSON.stringify(errData)}`;
-                alert(msg); // <--- THIS WILL POP UP ON YOUR SCREEN
-                throw new Error(msg);
+                console.error("API Error:", errData);
+                throw new Error("API Refused connection. Check API Key or Network.");
             }
-            // -----------------------------
 
             const data = await response.json();
+            
+            if (!data.features || data.features.length === 0) {
+                 throw new Error("No route found.");
+            }
+
             routeLayer = L.geoJSON(data, {
                 style: { color: '#3a7bd5', weight: 5, opacity: 0.7 }
             }).addTo(map);
+            
             map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
 
             const props = data.features[0].properties;
@@ -320,10 +322,7 @@
 
         } catch (error) {
             console.error(error);
-            // Don't alert here if we already alerted above
-            if (!error.message.includes("API Error")) {
-                alert("Network Error: " + error.message);
-            }
+            alert("Error: " + error.message + "\n(Try testing on a personal device)");
         } finally {
             btn.disabled = false;
             btn.innerText = "Generate Loop";
