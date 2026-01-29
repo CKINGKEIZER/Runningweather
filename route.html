@@ -140,51 +140,78 @@
     });
 
     async function generateRoute() {
-        if (!selectedLat) return alert("Click map to set start.");
-        if (!API_KEY) return alert("API Key is missing.");
+    if (!selectedLat) return alert("Click map to set start.");
+    
+    const btn = document.getElementById('gen-btn');
+    const stats = document.getElementById('stats');
+    btn.disabled = true; 
+    btn.innerText = "Calculating...";
+    
+    if (routeLayer) map.removeLayer(routeLayer);
 
-        const btn = document.getElementById('gen-btn');
-        const stats = document.getElementById('stats');
-        btn.disabled = true; btn.innerText = "Calculating...";
-        if (routeLayer) map.removeLayer(routeLayer);
+    // Convert km from slider to meters for the API
+    const targetDistanceMeters = parseFloat(document.getElementById('dist-slider').value) * 1000;
+    
+    // API Endpoint for POST request
+    const url = 'https://api.openrouteservice.org/v2/directions/foot-walking/geojson';
 
-        const dist = parseFloat(document.getElementById('dist-slider').value) * 1000;
-        const seed = Math.floor(Math.random() * 100);
-        
-        // 1. Build Parameters
-        const options = JSON.stringify({ 
-            round_trip: { length: dist, points: 3, seed: seed } 
+    const body = {
+        coordinates: [[selectedLng, selectedLat], [selectedLng, selectedLat]],
+        options: {
+            round_trip: {
+                length: targetDistanceMeters,
+                points: 3, // More points = more "loop-like", fewer = more "out and back"
+                seed: Math.floor(Math.random() * 100)
+            }
+        },
+        units: "m"
+    };
+
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': API_KEY // The API accepts the eyJ... key in the header
+            },
+            body: JSON.stringify(body)
         });
 
-        // 2. Build URL 
-        // We pass the key in the URL parameter 'api_key' to ensure CORS works for GET requests
-        const targetUrl = `https://api.openrouteservice.org/v2/directions/foot-walking?api_key=${API_KEY}&start=${selectedLng},${selectedLat}&end=${selectedLng},${selectedLat}&options=${encodeURIComponent(options)}`;
-
-        try {
-            // 3. Fetch
-            const res = await fetch(targetUrl, { method: 'GET' });
-
-            if (!res.ok) {
-                // If the server rejects the key, it will say so here
-                const errData = await res.json();
-                throw new Error(errData.error ? JSON.stringify(errData.error) : `Server error: ${res.status}`);
-            }
-
-            const data = await res.json();
-            if (!data.features) throw new Error("No route found.");
-
-            routeLayer = L.geoJSON(data, { style: { color: '#3a7bd5', weight: 5, opacity: 0.7 } }).addTo(map);
-            map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
-            
-            const props = data.features[0].properties;
-            stats.innerHTML = `${(props.summary.distance/1000).toFixed(2)} km • ${Math.round(props.summary.duration/60)} min`;
-        } catch (e) {
-            console.error(e);
-            alert("Error: " + e.message);
-        } finally {
-            btn.disabled = false; btn.innerText = "Generate Loop";
+        if (!res.ok) {
+            const errorData = await res.json();
+            throw new Error(errorData.error?.message || `Status: ${res.status}`);
         }
+
+        const data = await res.json();
+        
+        if (!data.features || data.features.length === 0) {
+            throw new Error("Could not find a suitable loop for this distance. Try a different spot.");
+        }
+
+        // 1. Render the Route
+        routeLayer = L.geoJSON(data, {
+            style: { color: '#3a7bd5', weight: 5, opacity: 0.8 }
+        }).addTo(map);
+
+        // 2. Zoom to fit the new loop
+        map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
+
+        // 3. Update Stats (Correcting the NaN issue)
+        const summary = data.features[0].properties.summary;
+        const finalDistKm = (summary.distance / 1000).toFixed(2);
+        const finalDurationMin = Math.round(summary.duration / 60);
+        
+        stats.innerHTML = `${finalDistKm} km • ${finalDurationMin} min`;
+
+    } catch (e) {
+        console.error("Route Error:", e);
+        alert("Error generating loop: " + e.message);
+        stats.innerHTML = "Route failed";
+    } finally {
+        btn.disabled = false; 
+        btn.innerText = "Generate Loop";
     }
+}
 </script>
 </body>
 </html>
