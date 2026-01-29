@@ -149,22 +149,18 @@
     
     if (routeLayer) map.removeLayer(routeLayer);
 
-    // Convert km from slider to meters for the API
     const targetDistanceMeters = parseFloat(document.getElementById('dist-slider').value) * 1000;
-    
-    // API Endpoint for POST request
     const url = 'https://api.openrouteservice.org/v2/directions/foot-walking/geojson';
 
     const body = {
-        coordinates: [[selectedLng, selectedLat], [selectedLng, selectedLat]],
+        coordinates: [[selectedLng, selectedLat]], // ← FIXED: Only one coordinate pair
         options: {
             round_trip: {
                 length: targetDistanceMeters,
-                points: 3, // More points = more "loop-like", fewer = more "out and back"
+                points: 3,
                 seed: Math.floor(Math.random() * 100)
             }
-        },
-        units: "m"
+        }
     };
 
     try {
@@ -172,7 +168,7 @@
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': API_KEY // The API accepts the eyJ... key in the header
+                'Authorization': API_KEY
             },
             body: JSON.stringify(body)
         });
@@ -188,15 +184,12 @@
             throw new Error("Could not find a suitable loop for this distance. Try a different spot.");
         }
 
-        // 1. Render the Route
         routeLayer = L.geoJSON(data, {
             style: { color: '#3a7bd5', weight: 5, opacity: 0.8 }
         }).addTo(map);
 
-        // 2. Zoom to fit the new loop
         map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
 
-        // 3. Update Stats (Correcting the NaN issue)
         const summary = data.features[0].properties.summary;
         const finalDistKm = (summary.distance / 1000).toFixed(2);
         const finalDurationMin = Math.round(summary.duration / 60);
@@ -212,6 +205,7 @@
         btn.innerText = "Generate Loop";
     }
 }
+
 </script>
 </body>
 </html>
