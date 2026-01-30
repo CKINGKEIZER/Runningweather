@@ -87,6 +87,33 @@
     let map, startMarker, routeLayer;
     let selectedLat = null, selectedLng = null;
     let debounceTimer;
+    const ROUTE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function routeCacheKey(lat, lng, km) {
+  return `routeCache:${lat.toFixed(5)},${lng.toFixed(5)}:${km.toFixed(1)}`;
+}
+
+function loadCachedRoute(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (!obj || !obj.savedAt || !obj.geojson) return null;
+    if ((Date.now() - obj.savedAt) > ROUTE_CACHE_TTL_MS) return null;
+    return obj.geojson;
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedRoute(key, geojson) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), geojson }));
+  } catch {
+    // ignore quota errors
+  }
+}
+
     
     // Init Map
     map = L.map('map').setView([51.505, -0.09], 13);
@@ -115,15 +142,6 @@
             }
         });
     }
-    // Geolocation
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(pos => {
-            if(!selectedLat) {
-                map.setView([pos.coords.latitude, pos.coords.longitude], 14);
-                setStartPoint(pos.coords.latitude, pos.coords.longitude);
-            }
-        });
-    }
 
     // Search
     const input = document.getElementById('city-input');
@@ -134,77 +152,147 @@
         debounceTimer = setTimeout(async () => {
             const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${e.target.value}&count=5&language=en&format=json`);
             const data = await res.json();
-            suggestionsBox.innerHTML = data.results ? data.results.map(p => 
-                `<div class="suggestion-item" onclick="selectCity('${p.name}', ${p.latitude}, ${p.longitude})"><strong>${p.name}</strong>, ${p.country}</div>`
-            ).join('') : '';
+            suggestionsBox.innerHTML = data.results ? data.results.map(p =>
+        `<div class="suggestion-item" onclick="selectCity('${p.name}', ${p.latitude}, ${p.longitude}, '${p.timezone || ''}')">
+            <strong>${p.name}</strong>, ${p.country}
+        </div>`
+        ).join('') : '';
+
             suggestionsBox.style.display = 'block';
         }, 300);
     });
 
-        function selectCity(name, lat, lon) {
-        input.value = name;
-        suggestionsBox.style.display = 'none';
-        map.setView([lat, lon], 14);
-        setStartPoint(lat, lon);
-        
-        // NEW: Update LocalStorage when city changes here too
-        // (Note: We might not have timezone here, but that's okay for the route page)
-        const locationData = { name, lat, lon, timezone: null }; 
-        localStorage.setItem('userLocation', JSON.stringify(locationData));
+        function selectCity(name, lat, lon, timezone) {
+    input.value = name;
+    suggestionsBox.style.display = 'none';
+    map.setView([lat, lon], 14);
+    setStartPoint(lat, lon);
+
+    // Preserve timezone if we have it, otherwise keep existing saved timezone
+    const existing = localStorage.getItem('userLocation');
+    const existingTz = existing ? (JSON.parse(existing).timezone || null) : null;
+
+    const locationData = { name, lat, lon, timezone: timezone || existingTz };
+    localStorage.setItem('userLocation', JSON.stringify(locationData));
     }
+
 
 
     map.on('click', e => setStartPoint(e.latlng.lat, e.latlng.lng));
 
     function setStartPoint(lat, lng) {
-        selectedLat = lat; selectedLng = lng;
-        if (startMarker) map.removeLayer(startMarker);
-        startMarker = L.marker([lat, lng], {draggable:true}).addTo(map);
-        if (routeLayer) map.removeLayer(routeLayer);
-        document.getElementById('stats').innerText = "";
-    }
+  selectedLat = lat;
+  selectedLng = lng;
+
+  if (startMarker) map.removeLayer(startMarker);
+  startMarker = L.marker([lat, lng], { draggable: true }).addTo(map);
+
+  // Update start coords after dragging
+  startMarker.on('dragend', () => {
+    const p = startMarker.getLatLng();
+    selectedLat = p.lat;
+    selectedLng = p.lng;
+    if (routeLayer) map.removeLayer(routeLayer);
+    document.getElementById('stats').innerText = "";
+  });
+
+  if (routeLayer) map.removeLayer(routeLayer);
+  document.getElementById('stats').innerText = "";
+}
+
 
     document.getElementById('dist-slider').addEventListener('input', e => {
         document.getElementById('dist-val').innerText = parseFloat(e.target.value).toFixed(1);
     });
 
     // Helper function to analyze route quality
-function analyzeRouteQuality(coordinates) {
-    if (coordinates.length < 4) return { backtrackScore: 0, valid: true };
-    
-    let backtrackCount = 0;
-    let totalTurns = 0;
-    
-    // Check for direction reversals (backtracking indicator)
-    for (let i = 2; i < coordinates.length; i++) {
-        const [lon1, lat1] = coordinates[i - 2];
-        const [lon2, lat2] = coordinates[i - 1];
-        const [lon3, lat3] = coordinates[i];
-        
-        // Calculate bearing changes
-        const bearing1 = Math.atan2(lon2 - lon1, lat2 - lat1);
-        const bearing2 = Math.atan2(lon3 - lon2, lat3 - lat2);
-        const bearingDiff = Math.abs(bearing2 - bearing1) * (180 / Math.PI);
-        
-        totalTurns++;
-        
-        // 160-180° turns = likely backtracking
-        if (bearingDiff > 160 && bearingDiff < 200) {
-            backtrackCount++;
-        }
-    }
-    
-    const backtrackScore = totalTurns > 0 ? backtrackCount / totalTurns : 0;
-    
-    return {
-        backtrackScore: backtrackScore,
-        backtrackCount: backtrackCount,
-        valid: backtrackScore < 0.15 // Less than 15% sharp reversals
-    };
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = (x) => x * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function turnAngleDeg(a, b, c) {
+  // a,b,c are [lon, lat]
+  const latRad = b[1] * Math.PI / 180;
+
+  const v1x = (b[0] - a[0]) * Math.cos(latRad);
+  const v1y = (b[1] - a[1]);
+  const v2x = (c[0] - b[0]) * Math.cos(latRad);
+  const v2y = (c[1] - b[1]);
+
+  const dot = v1x * v2x + v1y * v2y;
+  const m1 = Math.hypot(v1x, v1y);
+  const m2 = Math.hypot(v2x, v2y);
+  if (m1 === 0 || m2 === 0) return 0;
+
+  const cos = Math.max(-1, Math.min(1, dot / (m1 * m2)));
+  return Math.acos(cos) * (180 / Math.PI); // 0..180
+}
+
+function analyzeRouteQuality(coords) {
+  if (!coords || coords.length < 4) {
+    return { backtrackScore: 1, backtrackCount: 0, closureMeters: Infinity, valid: false };
+  }
+
+  let backtrackCount = 0;
+  let totalTurns = 0;
+
+  for (let i = 2; i < coords.length; i++) {
+    const ang = turnAngleDeg(coords[i - 2], coords[i - 1], coords[i]);
+    totalTurns++;
+    if (ang > 160) backtrackCount++;
+  }
+
+  const backtrackScore = totalTurns > 0 ? backtrackCount / totalTurns : 1;
+
+  const start = coords[0];
+  const end = coords[coords.length - 1];
+  const closureMeters = haversineMeters(start[1], start[0], end[1], end[0]);
+
+  // Thresholds tuned for “running loop”
+  const valid = backtrackScore < 0.12 && closureMeters < 150;
+
+  return { backtrackScore, backtrackCount, closureMeters, valid };
+}
+
+function clamp(x, lo, hi) {
+  return Math.max(lo, Math.min(hi, x));
+}
+
+function stableSeed(lat, lng, km) {
+  // Deterministic, stable per start + distance
+  const a = Math.floor((lat + 90) * 10000);
+  const b = Math.floor((lng + 180) * 10000);
+  const c = Math.floor(km * 10);
+  let s = (a * 73856093) ^ (b * 19349663) ^ (c * 83492791);
+  s = (s >>> 0) % 1000000000;
+  return s;
 }
 
 async function generateRoute() {
-    if (!selectedLat) return alert("Click map to set start.");
+  if (!selectedLat) return alert("Click map to set start.");
+
+  const targetKm = parseFloat(document.getElementById('dist-slider').value);
+  const cacheKey = routeCacheKey(selectedLat, selectedLng, targetKm);
+  const cached = loadCachedRoute(cacheKey);
+
+  if (cached) {
+    if (routeLayer) map.removeLayer(routeLayer);
+    routeLayer = L.geoJSON(cached, { style: { color: '#3a7bd5', weight: 5, opacity: 0.8 } }).addTo(map);
+    map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
+
+    const summary = cached.features[0].properties.summary;
+    const finalDistKm = (summary.distance / 1000).toFixed(2);
+    const runningTimeMin = Math.round((summary.distance / 1000) / 10 * 60);
+    document.getElementById('stats').innerHTML = `${finalDistKm} km • ${runningTimeMin} min (10 km/h)`;
+    return;
+  }
     
     const btn = document.getElementById('gen-btn');
     const stats = document.getElementById('stats');
@@ -213,8 +301,8 @@ async function generateRoute() {
     
     if (routeLayer) map.removeLayer(routeLayer);
 
-    const targetKm = parseFloat(document.getElementById('dist-slider').value);
     const targetDistanceMeters = targetKm * 1000;
+
     
     const url = 'https://api.openrouteservice.org/v2/directions/foot-walking/geojson';
 
@@ -224,39 +312,34 @@ async function generateRoute() {
     
     try {
         // Try multiple route variations
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
-            // Strategy 1: Vary the number of points (3-5)
-            const pointCount = 3 + (attempt % 3);
-            
-            // Strategy 2: Vary distance compensation based on point count
-            // More points = need more compensation
-            const compensation = pointCount === 3 ? 0.90 : 
-                                pointCount === 4 ? 0.85 : 0.80;
-            
-            const adjustedDistance = Math.round(targetDistanceMeters * compensation);
-            
-            // Strategy 3: Use different seeds
-            const seed = Math.floor(Math.random() * 1000);
-            
-            const body = {
-                coordinates: [[selectedLng, selectedLat]],
-                options: {
-                    round_trip: {
-                        length: adjustedDistance,
-                        points: pointCount,
-                        seed: seed
-                    }
-                }
-            };
+        const pointsPlan = [4, 5, 3, 5, 4];              // explore shape, but still “loop-first”
+        let lengthFactor = 0.88;                         // starting guess, then adapt
+        const base = stableSeed(selectedLat, selectedLng, targetKm);
 
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': API_KEY
-                },
-                body: JSON.stringify(body)
-            });
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          const pointCount = pointsPlan[attempt] || 4;
+          const adjustedDistance = Math.round(targetDistanceMeters * lengthFactor);
+          const seed = (base + attempt * 97) % 1000000000;
+
+          const body = {
+            coordinates: [[selectedLng, selectedLat]],
+            options: {
+              // Optional, improves “pleasantness” for foot profiles without extra calls
+              // Weightings supported for foot-* profiles. :contentReference[oaicite:2]{index=2}
+              profile_params: { weightings: { green: 1, quiet: 1 } },
+              round_trip: { length: adjustedDistance, points: pointCount, seed: seed }
+            }
+          };
+
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': API_KEY
+            },
+            body: JSON.stringify(body)
+          });
+
 
             if (!res.ok) continue; // Skip failed attempts
             
@@ -267,13 +350,20 @@ async function generateRoute() {
             const coords = data.features[0].geometry.coordinates;
             const summary = data.features[0].properties.summary;
             const actualDistKm = summary.distance / 1000;
-            
-            // Calculate quality score
+
+            // Adapt lengthFactor for next attempt (no extra requests, smarter use of 5 attempts)
+            if (actualDistKm > 0.5) {
+              const ratio = targetKm / actualDistKm;
+              lengthFactor = clamp(lengthFactor * ratio, 0.65, 1.10);
+            }
+
             const quality = analyzeRouteQuality(coords);
             const distanceError = Math.abs(actualDistKm - targetKm) / targetKm;
-            
-            // Combined score: backtracking penalty + distance accuracy
-            const score = (quality.backtrackScore * 100) + (distanceError * 50);
+
+            // Score: backtracking dominates, then closure, then distance accuracy
+            const closurePenalty = clamp(quality.closureMeters / 50, 0, 10); // 0..10 roughly
+            const score = (quality.backtrackScore * 120) + (closurePenalty * 5) + (distanceError * 60);
+
             
             console.log(`Attempt ${attempt + 1}: ${pointCount} points, ${actualDistKm.toFixed(2)}km, backtrack: ${quality.backtrackCount}, score: ${score.toFixed(2)}`);
             
@@ -293,6 +383,7 @@ async function generateRoute() {
         if (!bestRoute) {
             throw new Error("Could not find a suitable loop. Try a different location or distance.");
         }
+        saveCachedRoute(cacheKey, bestRoute);
 
         // Render the best route
         routeLayer = L.geoJSON(bestRoute, {
@@ -308,7 +399,7 @@ async function generateRoute() {
         const runningTimeMin = Math.round((summary.distance / 1000) / 10 * 60);
         
         // Update stats with new format
-        stats.innerHTML = `${finalDistKm} km • ${runningTimeMin}min (10 km/u)`;
+        stats.innerHTML = `${finalDistKm} km • ${runningTimeMin} min (10 km/h)`;
 
     } catch (e) {
         console.error("Route Error:", e);
