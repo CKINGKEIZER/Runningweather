@@ -380,6 +380,44 @@ function perpendicularDist(p, p1, p2) {
     return num / den;
 }
 
+// ---------------------------------------------------------
+// Helper: Detour Remover
+// Detects inefficient "spikes" (like crossing a street and back).
+// If A->B->C is > 3x longer than A->C, we skip B.
+// ---------------------------------------------------------
+function removeDetours(coords) {
+    if (!coords || coords.length < 3) return coords;
+    
+    const clean = [coords[0]]; // Always keep start
+    
+    // We look ahead. If we skip a point, we continue from the *previous* valid point.
+    for (let i = 1; i < coords.length - 1; i++) {
+        const prev = clean[clean.length - 1];
+        const curr = coords[i];
+        const next = coords[i+1];
+
+        const d1 = haversineMeters(prev[1], prev[0], curr[1], curr[0]);
+        const d2 = haversineMeters(curr[1], curr[0], next[1], next[0]);
+        const direct = haversineMeters(prev[1], prev[0], next[1], next[0]);
+        
+        const pathDist = d1 + d2;
+        
+        // THE LOGIC:
+        // 1. Is it a huge detour? (Path is > 3x the direct distance)
+        // 2. Is the detour relatively small? (< 150m total) - prevents cutting off real lakes/buildings
+        // 3. Is the direct path very short? (< 20m) - snaps micro-jitters
+        const isInefficient = (pathDist > (direct * 3)) && (pathDist < 150);
+        const isNoise = (direct < 15) && (pathDist > direct * 1.5);
+
+        if (!isInefficient && !isNoise) {
+            clean.push(curr);
+        }
+    }
+    
+    clean.push(coords[coords.length - 1]); // Always keep end
+    return clean;
+}
+
 async function generateRoute() {
     if (!selectedLat) return alert("Click map to set start.");
 
@@ -450,18 +488,20 @@ async function generateRoute() {
             // -------------------------------------------------------
             const rawCoords = data.features[0].geometry.coordinates;
 
-            // Apply Simplification: 0.0001 degrees is ~8-11 meters
-            // This snaps the jagged crosswalks into straight lines
-            const coords = simplifyCoords(rawCoords, 0.0001);
+            // STEP A: Kill the "monstrosities" (inefficient zigzags) first
+            const detouredCoords = removeDetours(rawCoords);
+
+            // STEP B: Smooth the remaining lines (RDP algorithm)
+            // Increased epsilon slightly to 0.00015 (approx 15m) for better road snapping
+            const coords = simplifyCoords(detouredCoords, 0.00015);
             
-            // Overwrite geometry with clean version
+            // Overwrite geometry
             data.features[0].geometry.coordinates = coords;
 
-            // Recalculate distance (because we just shortened the path by removing zigzags)
+            // Recalculate distance
             let newDistMeters = 0;
             for(let i=0; i<coords.length-1; i++) {
-                // Ensure haversineMeters is defined in your global scope
-                newDistMeters += haversineMeters(coords[i][1], coords[i][0], coords[i+1][1], coords[i+1][0]);
+                 newDistMeters += haversineMeters(coords[i][1], coords[i][0], coords[i+1][1], coords[i+1][0]);
             }
             // Update the data object's properties
             data.features[0].properties.summary.distance = newDistMeters;
