@@ -343,92 +343,92 @@ async function generateRoute() {
     
     const url = '/api/ors';
 
-    let bestRoute = null;
-    let bestScore = Infinity;
-    const maxAttempts = 5; // Try 5 different seeds
-    
-    try {
-        // Try multiple route variations
-        const pointsPlan = [4, 5, 3, 5, 4];              // explore shape, but still “loop-first”
-        let lengthFactor = 0.88;                         // starting guess, then adapt
-        const base = stableSeed(selectedLat, selectedLng, targetKm);
+        const maxAttempts = 10;
+const distTol = 0.06;       // 6% distance tolerance
+const overlapTol = 0.10;    // 0.10 is strict, relax to 0.15 if too many failures
+const closureTolM = 60;
 
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
-          const pointCount = pointsPlan[attempt] || 4;
-          const adjustedDistance = Math.round(targetDistanceMeters * lengthFactor);
-          const seed = (base + attempt * 97) % 1000000000;
+let bestRoute = null;
+let bestScore = Infinity;
 
-          const body = {
-            coordinates: [[selectedLng, selectedLat]],
-            options: {
-              // Optional, improves “pleasantness” for foot profiles without extra calls
-              // Weightings supported for foot-* profiles. :contentReference[oaicite:2]{index=2}
-              profile_params: { weightings: { green: 1, quiet: 1 } },
-              round_trip: { length: adjustedDistance, points: pointCount, seed: seed }
-            }
-          };
+let lengthFactor = 1.0;
+const base = stableSeed(selectedLat, selectedLng, targetKm);
+try {
+for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  const seed = (base + attempt * 97) % 1000000000;
 
-          const res = await fetch(url, {
-            method: 'POST',
-            headers: {
-        'Content-Type': 'application/json'
-        },
+  // Allow wider correction range than your current clamp
+  const adjustedDistance = Math.round(targetDistanceMeters * clamp(lengthFactor, 0.45, 1.80));
 
-            body: JSON.stringify(body)
-          });
+  const body = {
+    coordinates: [[selectedLng, selectedLat]],
+    options: {
+      // Avoid obvious “annoying” foot-routing artifacts where possible
+      avoid_features: ["fords", "ferries", "steps"],
 
-
-        if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        console.warn("ORS error:", res.status, errText);
-
-        // If attempt 1 fails, fail fast so you see the real cause
-        if (attempt === 0) {
-            throw new Error(`ORS returned ${res.status}. ${errText.slice(0, 300)}`);
+      // Use documented structure for weightings (foot-* supports green/quiet)
+      profile_params: {
+        weightings: {
+          green: { factor: 0.6 },
+          quiet: { factor: 0.8 }
         }
+      },
 
-        continue;
-        }
+      // More points tends to be more circular (per docs), keep it stable
+      round_trip: { length: adjustedDistance, points: 6, seed }
+    }
+  };
 
-            
-            const data = await res.json();
-            
-            if (!data.features || data.features.length === 0) continue;
-            
-            const coords = data.features[0].geometry.coordinates;
-            const summary = data.features[0].properties.summary;
-            const actualDistKm = summary.distance / 1000;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
 
-            // Adapt lengthFactor for next attempt (no extra requests, smarter use of 5 attempts)
-            if (actualDistKm > 0.5) {
-              const ratio = targetKm / actualDistKm;
-              lengthFactor = clamp(lengthFactor * ratio, 0.65, 1.10);
-            }
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    if (attempt === 0) throw new Error(`ORS returned ${res.status}. ${errText.slice(0, 300)}`);
+    continue;
+  }
 
-            const quality = analyzeRouteQuality(coords);
-            const distanceError = Math.abs(actualDistKm - targetKm) / targetKm;
+  const data = await res.json();
+  if (!data.features || data.features.length === 0) continue;
 
-            // Score: backtracking dominates, then closure, then distance accuracy
-            const closurePenalty = clamp(quality.closureMeters / 50, 0, 10); // 0..10 roughly
-            const score = (quality.backtrackScore * 120) + (closurePenalty * 5) + (distanceError * 60);
+  const coords = data.features[0].geometry.coordinates;
+  const summary = data.features[0].properties.summary;
+  const actualDistKm = summary.distance / 1000;
 
-            
-            console.log(`Attempt ${attempt + 1}: ${pointCount} points, ${actualDistKm.toFixed(2)}km, backtrack: ${quality.backtrackCount}, score: ${score.toFixed(2)}`);
-            
-            // Keep the best route
-            if (quality.valid && score < bestScore) {
-            bestScore = score;
-            bestRoute = data;
-        }
+  // Update lengthFactor for the next attempt (simple proportional correction)
+  if (actualDistKm > 0.1) {
+    const ratio = targetKm / actualDistKm;
+    lengthFactor = lengthFactor * ratio;
+  }
 
+  const distanceError = Math.abs(actualDistKm - targetKm) / targetKm;
 
-            
-            // If we found an excellent route early, stop searching
-            if (quality.backtrackCount === 0 && distanceError < 0.15) {
-                console.log("Found excellent route early!");
-                break;
-            }
-        }
+  const quality = analyzeRouteQuality(coords);
+  const ov = overlapStats(coords);
+
+  // Hard filters first
+  if (quality.closureMeters > closureTolM) continue;
+  if (distanceError > distTol) continue;
+  if (ov.overlapRatio > overlapTol) continue;
+
+  // Score, distance + overlap dominate, backtrack only a small signal now
+  const score =
+    (distanceError * 500) +
+    (ov.overlapRatio * 800) +
+    (quality.backtrackScore * 50);
+
+  if (score < bestScore) {
+    bestScore = score;
+    bestRoute = data;
+  }
+
+  // If it is already very good, stop
+  if (distanceError < 0.03 && ov.overlapRatio < 0.05) break;
+}
+
         
         if (!bestRoute) {
             throw new Error("Could not find a suitable loop. Try a different location or distance.");
