@@ -314,6 +314,25 @@ function stableSeed(lat, lng, km) {
   return s;
 }
 
+function renderRoute(geojson) {
+    if (routeLayer) map.removeLayer(routeLayer);
+
+    routeLayer = L.geoJSON(geojson, {
+        style: { color: '#3a7bd5', weight: 5, opacity: 0.8 }
+    }).addTo(map);
+
+    map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
+
+    const summary = geojson.features[0].properties.summary;
+    const finalDistKm = (summary.distance / 1000).toFixed(2);
+    
+    // Calculate running time: (Distance in km / 10 km/h) * 60 minutes
+    const runningTimeMin = Math.round((summary.distance / 1000) / 10 * 60);
+
+    // Update stats
+    document.getElementById('stats').innerHTML = `${finalDistKm} km • ${runningTimeMin} min (10 km/h)`;
+}
+
 async function generateRoute() {
     if (!selectedLat) return alert("Click map to set start.");
 
@@ -443,24 +462,7 @@ async function generateRoute() {
         if (bestDiff < (targetKm * 0.1) && bestOv.overlapRatio < 0.10) {
             saveCachedRoute(cacheKey, bestRoute);
         }
-function renderRoute(geojson) {
-    if (routeLayer) map.removeLayer(routeLayer);
 
-    routeLayer = L.geoJSON(geojson, {
-        style: { color: '#3a7bd5', weight: 5, opacity: 0.8 }
-    }).addTo(map);
-
-    map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
-
-    const summary = geojson.features[0].properties.summary;
-    const finalDistKm = (summary.distance / 1000).toFixed(2);
-    
-    // Calculate running time: (Distance in km / 10 km/h) * 60 minutes
-    const runningTimeMin = Math.round((summary.distance / 1000) / 10 * 60);
-
-    // Update stats with new format
-    document.getElementById('stats').innerHTML = `${finalDistKm} km • ${runningTimeMin} min (10 km/h)`;
-}
         renderRoute(bestRoute);
 
     } catch (e) {
