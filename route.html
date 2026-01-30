@@ -373,10 +373,11 @@ async function generateRoute() {
             console.log(`Attempt ${attempt + 1}: ${pointCount} points, ${actualDistKm.toFixed(2)}km, backtrack: ${quality.backtrackCount}, score: ${score.toFixed(2)}`);
             
             // Keep the best route
-            if (quality.valid && score < bestScore) {
-                bestScore = score;
-                bestRoute = data;
+            if (score < bestScore) {
+            bestScore = score;
+            bestRoute = data;
             }
+
             
             // If we found an excellent route early, stop searching
             if (quality.backtrackCount === 0 && distanceError < 0.15) {
