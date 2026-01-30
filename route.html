@@ -6,8 +6,6 @@
     <title>Route Finder | RunWeather</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
 
-    <script src="https://unpkg.com/leaflet-simple-map-screenshoter"></script>
-
     <style>
         /* New Action Buttons */
         .action-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
@@ -120,6 +118,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://unpkg.com/leaflet-simple-map-screenshoter@0.4.5/dist/leaflet-simple-map-screenshoter.js"></script>
 
 <script>
     // ---------------------------------------------------------
@@ -628,22 +627,38 @@ try {
 } catch (e) { console.warn("Screenshot plugin failed:", e); }
 
 function downloadImage() {
+    if (!screenshoter) return alert("Screenshot plugin not loaded. Check script order.");
     if (!routeLayer) return alert("Generate a route first.");
     
-    // Force the map to fit the route perfectly before snapping
+    // Change button text to show processing
+    const btn = document.querySelector('button[onclick="downloadImage()"]');
+    const originalText = btn.innerText;
+    btn.innerText = "Capturing...";
+    btn.disabled = true;
+
+    // Force map render
     map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
     
-    screenshoter.takeScreen('image')
-        .then(blob => {
+    // Tiny delay to ensure tiles are ready
+    setTimeout(() => {
+        screenshoter.takeScreen('blob', {
+            caption: function () {
+                return 'RunWeather Route';
+            }
+        }).then(blob => {
             const link = document.createElement('a');
             link.download = `RunWeather_Route_${new Date().toISOString().slice(0,10)}.png`;
             link.href = URL.createObjectURL(blob);
             link.click();
-        })
-        .catch(e => {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }).catch(e => {
             console.error(e);
-            alert("Error creating image. Note: This feature requires a web server (localhost or https) to handle cross-origin map tiles.");
+            alert("Download failed. This is usually due to 'CORS' issues with map tiles. Check console for details.");
+            btn.innerText = originalText;
+            btn.disabled = false;
         });
+    }, 500);
 }
 function toggleSavedRoutes() {
     const list = document.getElementById('saved-list');
