@@ -260,22 +260,21 @@ function clamp(x, lo, hi) {
 }
 
 function overlapStats(coords) {
-  // Detects re-use of the same corridor using a ~15 m grid.
-  if (!coords || coords.length < 10) {
+  if (!coords || coords.length < 12) {
     return { overlapRatio: 1, uniqueRatio: 0, revisits: 0, samples: 0 };
   }
 
-  const cellSizeM = 15;
+  const cellSizeM = 25; // larger cell catches “same road” better
   const lat0 = coords[0][1] * Math.PI / 180;
   const mPerDegLat = 111320;
   const mPerDegLon = 111320 * Math.cos(lat0);
 
-  const seen = new Map(); // cellKey -> firstIndex
+  const seen = new Map();
   let revisits = 0;
   let samples = 0;
 
-  const step = 2;         // sample every 2 points to reduce noise
-  const minGap = 60;      // only count revisits that occur far later in the route
+  const step = 1; // sample every point
+  const minGap = Math.max(12, Math.floor(coords.length * 0.15)); // adaptive
 
   for (let i = 0; i < coords.length; i += step) {
     samples++;
@@ -297,10 +296,11 @@ function overlapStats(coords) {
     }
   }
 
-  const overlapRatio = samples ? (revisits / samples) : 1;     // higher = worse
-  const uniqueRatio = samples ? (seen.size / samples) : 0;     // higher = better
+  const overlapRatio = samples ? (revisits / samples) : 1;
+  const uniqueRatio = samples ? (seen.size / samples) : 0;
   return { overlapRatio, uniqueRatio, revisits, samples };
 }
+
 
 function stableSeed(lat, lng, km) {
   // Deterministic, stable per start + distance
@@ -343,7 +343,7 @@ async function generateRoute() {
     
     const url = '/api/ors';
 
-        const maxAttempts = 10;
+        const maxAttempts = 5;
 const distTol = 0.06;       // 6% distance tolerance
 const overlapTol = 0.10;    // 0.10 is strict, relax to 0.15 if too many failures
 const closureTolM = 60;
@@ -368,9 +368,7 @@ for (let attempt = 0; attempt < maxAttempts; attempt++) {
 
       // Use documented structure for weightings (foot-* supports green/quiet)
       profile_params: {
-        weightings: {
-          green: { factor: 0.6 },
-          quiet: { factor: 0.8 }
+        weightings: { weightings: { green: 0.6, quiet: 0.8 }
         }
       },
 
@@ -408,11 +406,21 @@ for (let attempt = 0; attempt < maxAttempts; attempt++) {
 
   const quality = analyzeRouteQuality(coords);
   const ov = overlapStats(coords);
+  console.log(
+  "attempt", attempt + 1,
+  "km", actualDistKm.toFixed(2),
+  "err", distanceError.toFixed(3),
+  "closure(m)", Math.round(quality.closureMeters),
+  "overlap", ov.overlapRatio.toFixed(3),
+  "unique", ov.uniqueRatio.toFixed(3)
+);
 
   // Hard filters first
   if (quality.closureMeters > closureTolM) continue;
   if (distanceError > distTol) continue;
-  if (ov.overlapRatio > overlapTol) continue;
+  if (ov.uniqueRatio < 0.75) continue;     // new, kills out-and-back
+  if (ov.overlapRatio > 0.06) continue;    // stricter than 0.10
+
 
   // Score, distance + overlap dominate, backtrack only a small signal now
   const score =
