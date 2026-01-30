@@ -368,9 +368,11 @@ for (let attempt = 0; attempt < maxAttempts; attempt++) {
 
       // Use documented structure for weightings (foot-* supports green/quiet)
       profile_params: {
-        weightings: { weightings: { green: 0.6, quiet: 0.8 }
-        }
-      },
+  weightings: {
+    green: { factor: 0.6 },
+    quiet: { factor: 0.8 }
+  }
+},
 
       // More points tends to be more circular (per docs), keep it stable
       round_trip: { length: adjustedDistance, points: 6, seed }
