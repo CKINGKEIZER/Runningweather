@@ -345,10 +345,10 @@ async function generateRoute() {
     
     const url = '/api/ors';
 
-        const maxAttempts = 5;
+const maxAttempts = 5;
 const distTol = 0.06;       // 6% distance tolerance
 const overlapTol = 0.10;    // 0.10 is strict, relax to 0.15 if too many failures
-const closureTolM = 60;
+const closureTolM = 200;
 
 let bestRoute = null;
 let bestScore = Infinity;
