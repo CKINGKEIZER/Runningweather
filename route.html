@@ -79,9 +79,6 @@
 
 <script>
     // ---------------------------------------------------------
-    // YOUR KEY
-    // ---------------------------------------------------------
-    const API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImY0YmFlNGU0MTI3MDQ4YTNiMmE0YmY5YzQ3OTcwMmM1IiwiaCI6Im11cm11cjY0In0='; 
     // ---------------------------------------------------------
 
     let map, startMarker, routeLayer;
@@ -304,7 +301,7 @@ async function generateRoute() {
     const targetDistanceMeters = targetKm * 1000;
 
     
-    const url = 'https://api.openrouteservice.org/v2/directions/foot-walking/geojson';
+    const url = '/api/ors';
 
     let bestRoute = null;
     let bestScore = Infinity;
@@ -334,9 +331,9 @@ async function generateRoute() {
           const res = await fetch(url, {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json',
-              'Authorization': API_KEY
-            },
+        'Content-Type': 'application/json'
+        },
+
             body: JSON.stringify(body)
           });
 
