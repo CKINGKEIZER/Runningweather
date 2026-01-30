@@ -315,135 +315,138 @@ function stableSeed(lat, lng, km) {
 }
 
 async function generateRoute() {
-  if (!selectedLat) return alert("Click map to set start.");
+    if (!selectedLat) return alert("Click map to set start.");
 
-  const targetKm = parseFloat(document.getElementById('dist-slider').value);
-  const cacheKey = routeCacheKey(selectedLat, selectedLng, targetKm);
-  const cached = loadCachedRoute(cacheKey);
+    const targetKm = parseFloat(document.getElementById('dist-slider').value);
+    const cacheKey = routeCacheKey(selectedLat, selectedLng, targetKm);
+    const cached = loadCachedRoute(cacheKey);
 
-  if (cached) {
-    if (routeLayer) map.removeLayer(routeLayer);
-    routeLayer = L.geoJSON(cached, { style: { color: '#3a7bd5', weight: 5, opacity: 0.8 } }).addTo(map);
-    map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
+    if (cached) {
+        if (routeLayer) map.removeLayer(routeLayer);
+        routeLayer = L.geoJSON(cached, { style: { color: '#3a7bd5', weight: 5, opacity: 0.8 } }).addTo(map);
+        map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
 
-    const summary = cached.features[0].properties.summary;
-    const finalDistKm = (summary.distance / 1000).toFixed(2);
-    const runningTimeMin = Math.round((summary.distance / 1000) / 10 * 60);
-    document.getElementById('stats').innerHTML = `${finalDistKm} km • ${runningTimeMin} min (10 km/h)`;
-    return;
-  }
-    
+        const summary = cached.features[0].properties.summary;
+        const finalDistKm = (summary.distance / 1000).toFixed(2);
+        const runningTimeMin = Math.round((summary.distance / 1000) / 10 * 60);
+        document.getElementById('stats').innerHTML = `${finalDistKm} km • ${runningTimeMin} min (10 km/h)`;
+        return;
+    }
+
     const btn = document.getElementById('gen-btn');
     const stats = document.getElementById('stats');
-    btn.disabled = true; 
+    btn.disabled = true;
     btn.innerText = "Finding best route...";
-    
+
     if (routeLayer) map.removeLayer(routeLayer);
 
     const targetDistanceMeters = targetKm * 1000;
-
-    
     const url = '/api/ors';
 
-const maxAttempts = 5;
-const distTol = 0.06;       // 6% distance tolerance
-const overlapTol = 0.10;    // 0.10 is strict, relax to 0.15 if too many failures
-const closureTolM = 200;
+    const maxAttempts = 5;
+    
+    // STRICT thresholds are used only to decide if we can stop early
+    const strictDistTol = 0.06;      
+    const strictOverlapTol = 0.06;
+    const closureTolM = 250; // Slightly relaxed to allow more candidates
 
-let bestRoute = null;
-let bestScore = Infinity;
+    let bestRoute = null;
+    let bestScore = Infinity;
 
-let lengthFactor = 1.0;
-const base = stableSeed(selectedLat, selectedLng, targetKm);
-try {
-for (let attempt = 0; attempt < maxAttempts; attempt++) {
-  const seed = (base + attempt * 97) % 1000000000;
+    let lengthFactor = 1.0;
+    const base = stableSeed(selectedLat, selectedLng, targetKm);
 
-  // Allow wider correction range than your current clamp
-  const adjustedDistance = Math.round(targetDistanceMeters * clamp(lengthFactor, 0.45, 1.80));
+    try {
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            const seed = (base + attempt * 97) % 1000000000;
 
-  const body = {
-    coordinates: [[selectedLng, selectedLat]],
-    options: {
-      // Avoid obvious “annoying” foot-routing artifacts where possible
-      avoid_features: ["fords", "ferries", "steps"],
+            // Allow wider correction range
+            const adjustedDistance = Math.round(targetDistanceMeters * clamp(lengthFactor, 0.45, 1.80));
 
-      // More points tends to be more circular (per docs), keep it stable
-      round_trip: { length: adjustedDistance, points: 6, seed }
-    }
-  };
+            const body = {
+                coordinates: [[selectedLng, selectedLat]],
+                options: {
+                    avoid_features: ["fords", "ferries", "steps"],
+                    round_trip: { length: adjustedDistance, points: 6, seed }
+                }
+            };
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  });
+            const res = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body)
+            });
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    if (attempt === 0) throw new Error(`ORS returned ${res.status}. ${errText.slice(0, 300)}`);
-    continue;
-  }
+            if (!res.ok) {
+                // If API fails on first try, throw. Otherwise ignore and use previous best.
+                if (attempt === 0 && !bestRoute) {
+                     const errText = await res.text().catch(() => "");
+                     throw new Error(`ORS returned ${res.status}. ${errText.slice(0, 300)}`);
+                }
+                continue; 
+            }
 
-  const data = await res.json();
-  if (!data.features || data.features.length === 0) continue;
+            const data = await res.json();
+            if (!data.features || data.features.length === 0) continue;
 
-  const coords = data.features[0].geometry.coordinates;
-  const summary = data.features[0].properties.summary;
-  const actualDistKm = summary.distance / 1000;
+            const coords = data.features[0].geometry.coordinates;
+            const summary = data.features[0].properties.summary;
+            const actualDistKm = summary.distance / 1000;
 
-  // Update lengthFactor for the next attempt (simple proportional correction)
-  if (actualDistKm > 0.1) {
-    const ratio = targetKm / actualDistKm;
-    lengthFactor = lengthFactor * ratio;
-  }
+            // Update lengthFactor for the next attempt
+            if (actualDistKm > 0.1) {
+                const ratio = targetKm / actualDistKm;
+                lengthFactor = lengthFactor * ratio;
+            }
 
-  const distanceError = Math.abs(actualDistKm - targetKm) / targetKm;
+            const distanceError = Math.abs(actualDistKm - targetKm) / targetKm;
+            const quality = analyzeRouteQuality(coords);
+            const ov = overlapStats(coords);
 
-  const quality = analyzeRouteQuality(coords);
-  const ov = overlapStats(coords);
-  console.log(
-  "attempt", attempt + 1,
-  "km", actualDistKm.toFixed(2),
-  "err", distanceError.toFixed(3),
-  "closure(m)", Math.round(quality.closureMeters),
-  "overlap", ov.overlapRatio.toFixed(3),
-  "unique", ov.uniqueRatio.toFixed(3)
-);
+            console.log(
+                "attempt", attempt + 1,
+                "km", actualDistKm.toFixed(2),
+                "err", distanceError.toFixed(3),
+                "closure", Math.round(quality.closureMeters),
+                "overlap", ov.overlapRatio.toFixed(3)
+            );
 
-  // Hard filters first
-  if (quality.closureMeters > closureTolM) continue;
-  if (distanceError > distTol) continue;
-  if (ov.uniqueRatio < 0.75) continue;     // new, kills out-and-back
-  if (ov.overlapRatio > 0.06) continue;    // stricter than 0.10
+            // 1. Sanity Check: Only discard if it's fundamentally broken
+            // Relaxed from previous strict "continue" blocks
+            if (quality.closureMeters > closureTolM) continue; 
+            if (distanceError > 0.35) continue; // Allow up to 35% error before hard fail
 
+            // 2. Score the route
+            const score =
+                (distanceError * 500) +
+                (ov.overlapRatio * 1000) + // Increased penalty for overlap
+                (quality.backtrackScore * 100);
 
-  // Score, distance + overlap dominate, backtrack only a small signal now
-  const score =
-    (distanceError * 500) +
-    (ov.overlapRatio * 800) +
-    (quality.backtrackScore * 50);
+            // 3. Update Best: If this is the best we've seen, keep it
+            if (score < bestScore) {
+                bestScore = score;
+                bestRoute = data;
+            }
 
-  if (score < bestScore) {
-    bestScore = score;
-    bestRoute = data;
-  }
+            // 4. Break early ONLY if it meets strict perfection criteria
+            const isPerfect = 
+                distanceError < strictDistTol && 
+                ov.overlapRatio < strictOverlapTol && 
+                ov.uniqueRatio > 0.8;
 
-  // If it is already very good, stop
-  if (distanceError < 0.03 && ov.overlapRatio < 0.05) break;
-}
+            if (isPerfect) break;
+        }
 
-        
         if (!bestRoute) {
             throw new Error("Could not find a suitable loop. Try a different location or distance.");
         }
-        {
-  const coords = bestRoute.features[0].geometry.coordinates;
-  const ov = overlapStats(coords);
-  if (ov.overlapRatio < 0.08 && ov.uniqueRatio > 0.75) {
-    saveCachedRoute(cacheKey, bestRoute);
-  }
-}
+
+        // Cache if it meets a reasonable standard (not necessarily perfect)
+        const finalCoords = bestRoute.features[0].geometry.coordinates;
+        const finalOv = overlapStats(finalCoords);
+        if (finalOv.overlapRatio < 0.10 && finalOv.uniqueRatio > 0.70) {
+            saveCachedRoute(cacheKey, bestRoute);
+        }
 
         // Render the best route
         routeLayer = L.geoJSON(bestRoute, {
@@ -452,13 +455,10 @@ for (let attempt = 0; attempt < maxAttempts; attempt++) {
 
         map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
 
-                const summary = bestRoute.features[0].properties.summary;
+        const summary = bestRoute.features[0].properties.summary;
         const finalDistKm = (summary.distance / 1000).toFixed(2);
-        
-        // Calculate running time: (Distance in km / 10 km/h) * 60 minutes
         const runningTimeMin = Math.round((summary.distance / 1000) / 10 * 60);
-        
-        // Update stats with new format
+
         stats.innerHTML = `${finalDistKm} km • ${runningTimeMin} min (10 km/h)`;
 
     } catch (e) {
@@ -466,7 +466,7 @@ for (let attempt = 0; attempt < maxAttempts; attempt++) {
         alert("Error generating loop: " + e.message);
         stats.innerHTML = "Route failed";
     } finally {
-        btn.disabled = false; 
+        btn.disabled = false;
         btn.innerText = "Generate Loop";
     }
 }
