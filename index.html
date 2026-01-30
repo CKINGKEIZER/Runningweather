@@ -268,6 +268,40 @@ let currentMode = 'asap';
 let currentSubMode = 'morning'; 
 let debounceTimer;
 
+const RUN_DURATION_MIN = 45;
+const EARLINESS_PENALTY_PER_HOUR = 1.5;
+const UTILITY_TIE_WINDOW = 1.0;
+
+function getTzParts(dateObj, tz) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    weekday: 'short',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(dateObj);
+
+  const get = (type) => parts.find(p => p.type === type)?.value;
+
+  const yyyy = get('year');
+  const mm = get('month');
+  const dd = get('day');
+  const weekday = get('weekday');
+  const hour = Number(get('hour'));
+  const minute = Number(get('minute'));
+
+  return {
+    dateKey: `${yyyy}-${mm}-${dd}`,
+    hour,
+    minute,
+    hourVal: hour + (minute / 60),
+    displayTime: `${weekday} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+  };
+}
+
 const input = document.getElementById('city-input');
 const suggestionsBox = document.getElementById('suggestions');
 const subControls = document.getElementById('sub-controls');
@@ -344,8 +378,10 @@ function pickRandom(arr) {
     return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function getWittyComment(best, cityNow) {
-    const diffHours = (best.timeObj - cityNow) / (1000 * 60 * 60);
+function getWittyComment(best, nowMs) {
+    const diffHours = (best.timeObj.getTime() - nowMs) / 36e5;
+    const expectedWet = best.precipMm * (best.precipProb / 100);
+    const effectiveWind = best.wind + 0.5 * Math.max(0, (best.gust ?? best.wind) - best.wind);
 
     // 1. IS IT NOW? (within 1.5 hours)
     if (diffHours >= 0 && diffHours < 1.5) {
@@ -388,7 +424,7 @@ function getWittyComment(best, cityNow) {
         ]);
     }
     // 2. IS IT RAINING?
-    if (best.precip > 20) {
+        if (expectedWet >= 1.5) {
         return pickRandom([
             "Don't worry, sweat is also wet.",
             "You're not made of sugar, you won't melt.",
@@ -426,7 +462,8 @@ function getWittyComment(best, cityNow) {
             "If it rains harder, you’ll look even more hardcore.",
             "Think of it as a free shower."
         ]);
-    } else if (best.precip > 0) {
+        } else if (expectedWet > 0.1) {
+
         return pickRandom([
             "A little drizzle never hurt anyone.",
             "Just a bit of mist to keep you cool.",
@@ -465,7 +502,8 @@ function getWittyComment(best, cityNow) {
         ]);
     }
     // 3. IS IT WINDY?
-    if (best.wind > 25) {
+    if (effectiveWind > 25) {
+
         return pickRandom([
             "Headwind builds character.",
             "Nature's resistance training.",
@@ -660,8 +698,26 @@ async function calculateRun() {
     resultArea.style.display = 'block';
     resultArea.innerHTML = '<p style="color:#64748b; text-align:center;">Analyzing weather & air quality...</p>';
 
-    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${selectedLat}&longitude=${selectedLon}&hourly=apparent_temperature,precipitation_probability,wind_speed_10m&daily=sunset&timezone=${selectedTimezone}&forecast_days=3`;
-    const aqiUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${selectedLat}&longitude=${selectedLon}&hourly=european_aqi&timezone=${selectedTimezone}&forecast_days=3`;
+   const weatherUrl =
+  `https://api.open-meteo.com/v1/forecast` +
+  `?latitude=${selectedLat}` +
+  `&longitude=${selectedLon}` +
+  `&hourly=temperature_2m,precipitation_probability,precipitation,wind_speed_10m,wind_gusts_10m` +
+  `&daily=sunset` +
+  `&timezone=${selectedTimezone}` +
+  `&forecast_days=3` +
+  `&timeformat=unixtime` +
+  `&temperature_unit=celsius` +
+  `&wind_speed_unit=kmh`;
+
+const aqiUrl =
+  `https://air-quality-api.open-meteo.com/v1/air-quality` +
+  `?latitude=${selectedLat}` +
+  `&longitude=${selectedLon}` +
+  `&hourly=european_aqi` +
+  `&timezone=${selectedTimezone}` +
+  `&forecast_days=3` +
+  `&timeformat=unixtime`;
 
     try {
         const [weatherRes, aqiRes] = await Promise.all([
@@ -671,48 +727,64 @@ async function calculateRun() {
 
         const data = await weatherRes.json();
         const aqiData = await aqiRes.json();
-        const cityNow = new Date(new Date().toLocaleString("en-US", { timeZone: selectedTimezone }));
+        const nowMs = Date.now();
+const todayKey = getTzParts(new Date(nowMs), selectedTimezone).dateKey;
 
-        // 3. Merge & Interpolate Data (30-min resolution)
-        let candidates = [];
-        const len = data.hourly.time.length;
+// Map AQI timestamp -> value (safe alignment)
+const aqiByTime = new Map();
+if (aqiData?.hourly?.time && aqiData?.hourly?.european_aqi) {
+  for (let k = 0; k < aqiData.hourly.time.length; k++) {
+    aqiByTime.set(aqiData.hourly.time[k], aqiData.hourly.european_aqi[k]);
+  }
+}
 
-        for (let i = 0; i < len; i++) {
-            // A. Exact Hour Data
-            const t1 = new Date(data.hourly.time[i]);
-            const temp1 = data.hourly.apparent_temperature[i];
-            const precip1 = data.hourly.precipitation_probability[i];
-            const wind1 = data.hourly.wind_speed_10m[i];
-            const aqi1 = aqiData.hourly?.european_aqi ? aqiData.hourly.european_aqi[i] : null;
+// 3. Merge & Interpolate Data (30-min resolution)
+let candidates = [];
+const len = data.hourly.time.length;
 
-            candidates.push(createCandidate(t1, temp1, precip1, wind1, aqi1));
+for (let i = 0; i < len; i++) {
+  const ts1 = data.hourly.time[i]; // unixtime seconds
+  const t1 = new Date(ts1 * 1000);
 
-            // B. Interpolate Half-Hour (if next hour exists)
-            if (i < len - 1) {
-                const temp2 = data.hourly.apparent_temperature[i+1];
-                const precip2 = data.hourly.precipitation_probability[i+1];
-                const wind2 = data.hourly.wind_speed_10m[i+1];
-                const aqi2 = aqiData.hourly?.european_aqi ? aqiData.hourly.european_aqi[i+1] : null;
+  const temp1 = data.hourly.temperature_2m[i];
+  const precipProb1 = data.hourly.precipitation_probability[i];
+  const precipMm1 = data.hourly.precipitation[i];
+  const wind1 = data.hourly.wind_speed_10m[i];
+  const gust1 = data.hourly.wind_gusts_10m[i];
 
-                // Time + 30 mins
-                const tMid = new Date(t1.getTime() + 30 * 60000);
-                
-                // Linear Interpolation (Average)
-                const tempMid = (temp1 + temp2) / 2;
-                const precipMid = (precip1 + precip2) / 2; 
-                const windMid = (wind1 + wind2) / 2;
-                
-                // Handle nulls for AQI
-                let aqiMid = null;
-                if (aqi1 !== null && aqi2 !== null) aqiMid = (aqi1 + aqi2) / 2;
-                else aqiMid = aqi1 || aqi2;
+  const aqi1 = aqiByTime.has(ts1) ? aqiByTime.get(ts1) : null;
 
-                candidates.push(createCandidate(tMid, tempMid, precipMid, windMid, aqiMid));
-            }
-        }
+  candidates.push(createCandidate(t1, selectedTimezone, temp1, precipProb1, precipMm1, wind1, gust1, aqi1));
 
-        // Filter past times
-        candidates = candidates.filter(c => c.timeObj >= cityNow);
+  if (i < len - 1) {
+    const ts2 = data.hourly.time[i + 1];
+    const tMid = new Date((ts1 * 1000) + (30 * 60000));
+
+    const temp2 = data.hourly.temperature_2m[i + 1];
+    const precipProb2 = data.hourly.precipitation_probability[i + 1];
+    const precipMm2 = data.hourly.precipitation[i + 1];
+    const wind2 = data.hourly.wind_speed_10m[i + 1];
+    const gust2 = data.hourly.wind_gusts_10m[i + 1];
+
+    const aqi2 = aqiByTime.has(ts2) ? aqiByTime.get(ts2) : null;
+
+    const tempMid = (temp1 + temp2) / 2;
+    const precipProbMid = (precipProb1 + precipProb2) / 2;
+    const precipMmMid = (precipMm1 + precipMm2) / 2;
+    const windMid = (wind1 + wind2) / 2;
+    const gustMid = (gust1 + gust2) / 2;
+
+    let aqiMid = null;
+    if (aqi1 !== null && aqi2 !== null) aqiMid = (aqi1 + aqi2) / 2;
+    else aqiMid = aqi1 ?? aqi2 ?? null;
+
+    candidates.push(createCandidate(tMid, selectedTimezone, tempMid, precipProbMid, precipMmMid, windMid, gustMid, aqiMid));
+  }
+}
+
+// Filter past times
+candidates = candidates.filter(c => c.timeObj.getTime() >= nowMs);
+
 
         if (candidates.length === 0) {
             resultArea.innerHTML = '<p style="text-align:center;">No upcoming slots found. Try "Best in 3 Days".</p>';
@@ -721,37 +793,47 @@ async function calculateRun() {
 
         // Apply Modes
         if (currentMode === 'asap') {
-            candidates = candidates.slice(0, 48); // 24 hours * 2 (half-hours)
+        candidates = candidates.slice(0, 48);
         } 
         else if (currentMode === 'tonight') {
-            const todayStr = cityNow.toLocaleDateString();
-            candidates = candidates.filter(c => {
-                return c.timeObj.toLocaleDateString() === todayStr && c.hourVal >= 17 && c.hourVal < 21;
-            });
+        candidates = candidates.filter(c => c.dateKey === todayKey && c.hourVal >= 17 && c.hourVal < 21);
         }
         else if (currentMode === '3day') {
-            if (currentSubMode === 'morning') candidates = candidates.filter(c => c.hourVal >= 8 && c.hourVal < 11);
-            else if (currentSubMode === 'midday') candidates = candidates.filter(c => c.hourVal >= 11 && c.hourVal < 17);
-            else if (currentSubMode === 'evening') candidates = candidates.filter(c => c.hourVal >= 17 && c.hourVal < 21);
+        if (currentSubMode === 'morning') candidates = candidates.filter(c => c.hourVal >= 8 && c.hourVal < 11);
+        else if (currentSubMode === 'midday') candidates = candidates.filter(c => c.hourVal >= 11 && c.hourVal < 17);
+        else if (currentSubMode === 'evening') candidates = candidates.filter(c => c.hourVal >= 17 && c.hourVal < 21);
         }
+
 
         if (candidates.length === 0) {
             resultArea.innerHTML = '<p style="text-align:center;">No matching time slots found.</p>';
             return;
         }
 
-        candidates.sort((a, b) => b.score - a.score);
-        const best = candidates[0];
-        const comment = getWittyComment(best, cityNow);
+        const best = pickBestStart(candidates, nowMs);
+        if (!best) {
+        resultArea.innerHTML = '<p style="text-align:center;">No matching time slots found.</p>';
+        return;
+        }
+        const comment = getWittyComment(best, nowMs);
         
         // --- BADGE LOGIC ---
         let sunsetHTML = '';
         if (currentMode === 'tonight' || (currentMode === '3day' && currentSubMode === 'evening')) {
-            const runDateStr = best.timeObj.toISOString().split('T')[0];
-            const dayIndex = data.daily.time.indexOf(runDateStr);
+                        const dayKeyToIndex = new Map();
+            for (let d = 0; d < data.daily.time.length; d++) {
+                const dayKey = getTzParts(new Date(data.daily.time[d] * 1000), selectedTimezone).dateKey;
+                dayKeyToIndex.set(dayKey, d);
+            }
+            const dayIndex = dayKeyToIndex.get(best.dateKey);
             if (dayIndex !== -1) {
-                const sunsetStr = data.daily.sunset[dayIndex];
-                const sunsetTime = new Date(sunsetStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const sunsetUnix = data.daily.sunset[dayIndex];
+                const sunsetTime = new Intl.DateTimeFormat('en-GB', {
+                    timeZone: selectedTimezone,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                }).format(new Date(sunsetUnix * 1000));
                 sunsetHTML = `<div class="badge sunset-badge">Sunset: ${sunsetTime}</div>`;
             }
         }
@@ -787,9 +869,10 @@ async function calculateRun() {
                 <div class="time">${best.displayTime}</div>
                 <div class="meta">
                     <span>${best.temp.toFixed(1)}°C</span>
-                    <span>💧 ${Math.round(best.precip)}%</span>
-                    <span>💨 ${best.wind.toFixed(0)}km/h</span>
+                    <span>💧 ${Math.round(best.precipProb)}% · ${best.precipMm.toFixed(1)}mm</span>
+                    <span>💨 ${best.wind.toFixed(0)}km/h · gust ${best.gust.toFixed(0)}km/h</span>
                 </div>
+
                 
                 <div class="badges-container">
                     ${aqiHTML}
@@ -820,53 +903,109 @@ function getTempScore(t) {
     return 0;
 }
 
-function getWindScore(w) {
-    // Davies (1980): Drag increases non-linearly.
-    // < 10km/h: Negligible impact.
-    // > 10km/h: Cubic decay to penalize high winds heavily.
-    if (w < 10) return 100;
-    // Cap penalty to avoid negative numbers before max
-    let penalty = Math.pow(w - 10, 1.3); 
-    return Math.max(0, 100 - penalty);
+function getWindScore(w, gust) {
+  const g = (gust === null || gust === undefined) ? w : gust;
+  const gustExcess = Math.max(0, g - w);
+  const wEff = w + (0.5 * gustExcess);
+
+  if (wEff < 10) return 100;
+
+  const penalty = Math.pow(wEff - 10, 1.3);
+  return Math.max(0, 100 - penalty);
 }
 
-function getPrecipScore(p) {
-    // Runners tolerate drizzle (<20%) well (cooling effect).
-    // >20%: Linear discomfort.
-    if (p <= 20) return 100;
-    return Math.max(0, 100 - ((p - 20) * 1.5));
+
+function getPrecipScore(prob, mm) {
+  if (prob === null || mm === null || prob === undefined || mm === undefined) return 100;
+
+  const expected = mm * (prob / 100);
+
+  if (expected <= 0.05) return 100;
+
+  if (expected <= 0.5) {
+    return 100 - ((expected - 0.05) / (0.5 - 0.05)) * 20;
+  }
+  if (expected <= 2.0) {
+    return 80 - ((expected - 0.5) / (2.0 - 0.5)) * 40;
+  }
+  if (expected <= 5.0) {
+    return 40 - ((expected - 2.0) / (5.0 - 2.0)) * 30;
+  }
+  return 10;
 }
 
 function getAqiScore(q) {
-    // European AQI Standards (CAQI)
-    // 0-25: Very Low (Ideal)
-    // >75: High (Health Risk - Hard Penalty)
-    if (q === null) return 100; // Assume good if no data
-    if (q <= 25) return 100;
-    if (q > 75) return 20; // Immediate "Do Not Run" signal
-    // Linear decay between 25 and 75
-    return 100 - ((q - 25) * 1.6);
+  if (q === null || q === undefined) return 80;
+
+  if (q <= 25) return 100;
+  if (q > 75) return 20;
+
+  return 100 - ((q - 25) * 1.6);
 }
 
-function calculateWeightedScore(temp, precip, wind, aqi) {
-    const sTemp = getTempScore(temp);
-    const sWind = getWindScore(wind);
-    const sPrecip = getPrecipScore(precip);
-    const sAqi = getAqiScore(aqi);
 
-    // Weighted Average based on impact on performance vs comfort
-    // Temp (40%): Physiological limit
-    // Precip (25%): Comfort/Safety
-    // Wind (20%): Effort cost
-    // AQI (15%): Health (but acts as gate if very low)
-    
-    let total = (sTemp * 0.40) + (sPrecip * 0.25) + (sWind * 0.20) + (sAqi * 0.15);
+function calculateWeightedScore(temp, precipProb, precipMm, wind, gust, aqi) {
+  const sTemp = getTempScore(temp);
+  const sWind = getWindScore(wind, gust);
+  const sPrecip = getPrecipScore(precipProb, precipMm);
+  const sAqi = getAqiScore(aqi);
 
-    // Hard Gate: If AQI is dangerous, cap total score at 40 (Red)
-    if (aqi > 75) total = Math.min(total, 40);
-    
-    return total;
+  let total = (sTemp * 0.40) + (sPrecip * 0.25) + (sWind * 0.20) + (sAqi * 0.15);
+
+  if (aqi !== null && aqi !== undefined && aqi > 75) total = Math.min(total, 40);
+
+  return total;
 }
+
+
+function scoreWindow(candidates, startIdx, durationMin) {
+  const startMs = candidates[startIdx].timeObj.getTime();
+  const endMs = startMs + durationMin * 60000;
+
+  const windowScores = [];
+  for (let j = startIdx; j < candidates.length; j++) {
+    const t = candidates[j].timeObj.getTime();
+    if (t >= endMs) break;
+    windowScores.push(candidates[j].score);
+  }
+
+  if (windowScores.length < 2) return null;
+
+  const sorted = [...windowScores].sort((a, b) => a - b);
+  const avg = windowScores.reduce((s, x) => s + x, 0) / windowScores.length;
+  const p20 = sorted[Math.floor(0.2 * (sorted.length - 1))];
+
+  const windowScore = (0.7 * avg) + (0.3 * p20);
+  return { windowScore };
+}
+
+function pickBestStart(candidates, nowMs) {
+  let best = null;
+  let bestUtility = -Infinity;
+
+  for (let i = 0; i < candidates.length; i++) {
+    const w = scoreWindow(candidates, i, RUN_DURATION_MIN);
+    if (!w) continue;
+
+    const hoursAhead = (candidates[i].timeObj.getTime() - nowMs) / 36e5;
+    const utility = w.windowScore - (EARLINESS_PENALTY_PER_HOUR * hoursAhead);
+
+    if (!best) {
+      best = { ...candidates[i], windowScore: w.windowScore, utility };
+      bestUtility = utility;
+      continue;
+    }
+
+    const diff = utility - bestUtility;
+    if (diff > 1e-6 || (Math.abs(diff) <= UTILITY_TIE_WINDOW && candidates[i].timeObj < best.timeObj)) {
+      best = { ...candidates[i], windowScore: w.windowScore, utility };
+      bestUtility = utility;
+    }
+  }
+
+  return best;
+}
+
 // NEW: Check for saved location on load
 window.addEventListener('load', () => {
     const saved = localStorage.getItem('userLocation');
@@ -880,20 +1019,27 @@ window.addEventListener('load', () => {
     }
 });
 // Updated Helper
-function createCandidate(timeObj, temp, precip, wind, aqi) {
-    const score = calculateWeightedScore(temp, precip, wind, aqi);
-    
-    return {
-        timeObj: timeObj,
-        displayTime: timeObj.toLocaleTimeString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
-        hourVal: timeObj.getHours() + (timeObj.getMinutes() / 60), 
-        temp: temp,
-        precip: precip,
-        wind: wind,
-        aqi: aqi,
-        score: score
-    };
+function createCandidate(timeObj, tz, temp, precipProb, precipMm, wind, gust, aqi) {
+  const score = calculateWeightedScore(temp, precipProb, precipMm, wind, gust, aqi);
+  const tzParts = getTzParts(timeObj, tz);
+
+  return {
+    timeObj,
+    displayTime: tzParts.displayTime,
+    dateKey: tzParts.dateKey,
+    hourVal: tzParts.hourVal,
+
+    temp,
+    precipProb,
+    precipMm,
+    wind,
+    gust,
+    aqi,
+
+    score
+  };
 }
+
 </script>
 
 </body>
