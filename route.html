@@ -111,7 +111,6 @@ function saveCachedRoute(key, geojson) {
   }
 }
 
-    
     // Init Map
     map = L.map('map').setView([51.505, -0.09], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
@@ -172,8 +171,6 @@ function saveCachedRoute(key, geojson) {
     const locationData = { name, lat, lon, timezone: timezone || existingTz };
     localStorage.setItem('userLocation', JSON.stringify(locationData));
     }
-
-
 
     map.on('click', e => setStartPoint(e.latlng.lat, e.latlng.lng));
 
@@ -338,7 +335,18 @@ async function generateRoute() {
           });
 
 
-            if (!res.ok) continue; // Skip failed attempts
+        if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        console.warn("ORS error:", res.status, errText);
+
+        // If attempt 1 fails, fail fast so you see the real cause
+        if (attempt === 0) {
+            throw new Error(`ORS returned ${res.status}. ${errText.slice(0, 300)}`);
+        }
+
+        continue;
+        }
+
             
             const data = await res.json();
             
