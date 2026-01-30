@@ -259,6 +259,49 @@ function clamp(x, lo, hi) {
   return Math.max(lo, Math.min(hi, x));
 }
 
+function overlapStats(coords) {
+  // Detects re-use of the same corridor using a ~15 m grid.
+  if (!coords || coords.length < 10) {
+    return { overlapRatio: 1, uniqueRatio: 0, revisits: 0, samples: 0 };
+  }
+
+  const cellSizeM = 15;
+  const lat0 = coords[0][1] * Math.PI / 180;
+  const mPerDegLat = 111320;
+  const mPerDegLon = 111320 * Math.cos(lat0);
+
+  const seen = new Map(); // cellKey -> firstIndex
+  let revisits = 0;
+  let samples = 0;
+
+  const step = 2;         // sample every 2 points to reduce noise
+  const minGap = 60;      // only count revisits that occur far later in the route
+
+  for (let i = 0; i < coords.length; i += step) {
+    samples++;
+    const lon = coords[i][0];
+    const lat = coords[i][1];
+
+    const x = lon * mPerDegLon;
+    const y = lat * mPerDegLat;
+
+    const cx = Math.round(x / cellSizeM);
+    const cy = Math.round(y / cellSizeM);
+    const key = `${cx}:${cy}`;
+
+    const prev = seen.get(key);
+    if (prev !== undefined) {
+      if ((i - prev) > minGap) revisits++;
+    } else {
+      seen.set(key, i);
+    }
+  }
+
+  const overlapRatio = samples ? (revisits / samples) : 1;     // higher = worse
+  const uniqueRatio = samples ? (seen.size / samples) : 0;     // higher = better
+  return { overlapRatio, uniqueRatio, revisits, samples };
+}
+
 function stableSeed(lat, lng, km) {
   // Deterministic, stable per start + distance
   const a = Math.floor((lat + 90) * 10000);
