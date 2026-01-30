@@ -5,6 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Route Finder | RunWeather</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+
+    <script src="https://unpkg.com/leaflet-simple-map-screenshoter"></script>
+
+    <style>
+        /* New Action Buttons */
+        .action-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+        .btn-secondary { background: #f1f5f9; color: #1e293b; border: 1px solid #cbd5e1; }
+        .btn-secondary:hover { background: #e2e8f0; }
+        
+        /* Saved Routes List */
+        .saved-list { 
+              margin-top: 20px; 
+              border-top: 1px solid #e2e8f0; 
+              padding-top: 20px; /* Fixed: was paddingTop */
+          }
+        .saved-item { 
+            display: flex; justify-content: space-between; align-items: center; 
+            padding: 12px; background: #f8fafc; border-radius: 8px; margin-bottom: 8px; cursor: pointer;
+            transition: background 0.2s;
+        }
+        .saved-item:hover { background: #eff6ff; }
+        .delete-btn { color: #ef4444; font-weight: bold; padding: 4px 8px; cursor: pointer; }
+    </style>
     
     <style>
         :root { --primary: #00d2ff; --secondary: #3a7bd5; --text: #1e293b; }
@@ -55,7 +78,15 @@
             <input type="text" id="city-input" placeholder="Search city (e.g. London)" autocomplete="off">
             <div id="suggestions" class="suggestions"></div>
         </div>
+        <div class="action-row">
+            <button class="action-btn btn-secondary" onclick="saveRoute()">★ Save Route</button>
+            <button class="action-btn btn-secondary" onclick="downloadImage()">⬇ Download Image</button>
+        </div>
 
+        <div id="saved-routes-container" class="saved-list">
+            <h3 style="font-size:1rem; margin-bottom:10px;">My Saved Routes</h3>
+            <div id="saved-list"></div>
+        </div>
         <div id="map"></div>
 
         <div class="controls">
@@ -82,6 +113,7 @@
     // ---------------------------------------------------------
 
     let map, startMarker, routeLayer;
+    let lastGeneratedRoute = null;
     let selectedLat = null, selectedLng = null;
     let debounceTimer;
     const ROUTE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -424,9 +456,10 @@ async function generateRoute() {
     const targetKm = parseFloat(document.getElementById('dist-slider').value);
     const cacheKey = routeCacheKey(selectedLat, selectedLng, targetKm);
     
-    // 1. Check Cache
+  // 1. Check Cache
     const cached = loadCachedRoute(cacheKey);
     if (cached) {
+        lastGeneratedRoute = cached; // <--- THIS IS THE NEW LINE
         renderRoute(cached);
         return;
     }
@@ -533,6 +566,7 @@ async function generateRoute() {
             if (!bestRoute || score < bestScore) {
                 bestScore = score;
                 bestRoute = data;
+                lastGeneratedRoute = data; // <--- THIS IS THE NEW LINE
             }
 
             // 6. Strict Success Criteria
@@ -566,6 +600,98 @@ async function generateRoute() {
         btn.innerText = "Generate Loop";
     }
 }
+// ---------------------------------------------------------
+// Feature: Screenshot / Download Image
+// ---------------------------------------------------------
+// Initialize the plugin (must run after map is created)
+const screenshoter = L.simpleMapScreenshoter({
+    hidden: true // hide the default download button (we use our own)
+}).addTo(map);
+
+function downloadImage() {
+    if (!routeLayer) return alert("Generate a route first.");
+    
+    // Force the map to fit the route perfectly before snapping
+    map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
+    
+    screenshoter.takeScreen('image')
+        .then(blob => {
+            const link = document.createElement('a');
+            link.download = `RunWeather_Route_${new Date().toISOString().slice(0,10)}.png`;
+            link.href = URL.createObjectURL(blob);
+            link.click();
+        })
+        .catch(e => {
+            console.error(e);
+            alert("Error creating image. Note: This feature requires a web server (localhost or https) to handle cross-origin map tiles.");
+        });
+}
+
+// ---------------------------------------------------------
+// Feature: Save / Load Favorites (LocalStorage)
+// ---------------------------------------------------------
+function saveRoute() {
+    if (!routeLayer || !lastGeneratedRoute) return alert("No route to save.");
+    
+    const favorites = JSON.parse(localStorage.getItem('favoriteRoutes') || '[]');
+    const summary = lastGeneratedRoute.features[0].properties.summary;
+    const dist = (summary.distance / 1000).toFixed(2);
+    
+    const newSave = {
+        id: Date.now(),
+        date: new Date().toLocaleDateString(),
+        city: document.getElementById('city-input').value,
+        dist: dist,
+        geojson: lastGeneratedRoute
+    };
+    
+    favorites.unshift(newSave); // Add to top
+    localStorage.setItem('favoriteRoutes', JSON.stringify(favorites));
+    renderFavorites();
+}
+
+function loadFavorite(id) {
+    const favorites = JSON.parse(localStorage.getItem('favoriteRoutes') || '[]');
+    const item = favorites.find(x => x.id === id);
+    if (item) {
+        renderRoute(item.geojson);
+        // Also center map on it
+        const lat = item.geojson.features[0].geometry.coordinates[0][1];
+        const lng = item.geojson.features[0].geometry.coordinates[0][0];
+        setStartPoint(lat, lng);
+    }
+}
+
+function deleteFavorite(id, event) {
+    event.stopPropagation(); // prevent clicking the row
+    let favorites = JSON.parse(localStorage.getItem('favoriteRoutes') || '[]');
+    favorites = favorites.filter(x => x.id !== id);
+    localStorage.setItem('favoriteRoutes', JSON.stringify(favorites));
+    renderFavorites();
+}
+
+function renderFavorites() {
+    const list = document.getElementById('saved-list');
+    const favorites = JSON.parse(localStorage.getItem('favoriteRoutes') || '[]');
+    
+    if (favorites.length === 0) {
+        list.innerHTML = '<p style="color:#94a3b8; font-size:0.9rem;">No saved routes yet.</p>';
+        return;
+    }
+
+    list.innerHTML = favorites.map(item => `
+        <div class="saved-item" onclick="loadFavorite(${item.id})">
+            <div>
+                <strong>${item.dist} km</strong> in ${item.city}
+                <div style="font-size:0.8rem; color:#64748b;">${item.date}</div>
+            </div>
+            <div class="delete-btn" onclick="deleteFavorite(${item.id}, event)">✕</div>
+        </div>
+    `).join('');
+}
+
+// Initial render on page load
+renderFavorites();
 
 </script>
 </body>
