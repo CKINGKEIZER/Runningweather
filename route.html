@@ -331,30 +331,42 @@ async function generateRoute() {
     const btn = document.getElementById('gen-btn');
     const stats = document.getElementById('stats');
     btn.disabled = true;
-    btn.innerText = "Finding best route...";
+    btn.innerText = "Optimizing distance...";
     if (routeLayer) map.removeLayer(routeLayer);
 
     const targetDistanceMeters = targetKm * 1000;
-    const maxAttempts = 5;
+    const maxAttempts = 6; // Increased attempts for better convergence
     
     let bestRoute = null;
     let bestScore = Infinity;
-    let lengthFactor = 1.0;
     
+    // Start with a neutral factor
+    let lengthFactor = 1.0; 
     const baseSeed = stableSeed(selectedLat, selectedLng, targetKm);
 
     try {
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
-            const seed = (baseSeed + attempt * 97) % 1000000000;
+            const seed = (baseSeed + attempt * 73) % 1000000000;
             
-            // Adjust requested distance based on previous results (feedback loop)
-            const adjustedDistance = Math.round(targetDistanceMeters * clamp(lengthFactor, 0.45, 1.80));
+            // LOGIC CHANGE 1: Widen the clamp. 
+            // If API gives 2km for 5km request, we must be allowed to ask for 12.5km.
+            const adjustedDistance = Math.round(targetDistanceMeters * clamp(lengthFactor, 0.2, 3.5));
+
+            // LOGIC CHANGE 2: Vary the 'points' parameter.
+            // Attempts 0-1: 4 points (Square/Diamond - expands well)
+            // Attempts 2-3: 5 points (Pentagon - balanced)
+            // Attempts 4-5: 6 points (Hexagon - circular but risk of zigzag)
+            const pointsVal = 4 + Math.floor(attempt / 2); 
 
             const body = {
                 coordinates: [[selectedLng, selectedLat]],
                 options: {
                     avoid_features: ["fords", "ferries", "steps"],
-                    round_trip: { length: adjustedDistance, points: 6, seed }
+                    round_trip: { 
+                        length: adjustedDistance, 
+                        points: pointsVal, 
+                        seed: seed 
+                    }
                 }
             };
 
@@ -366,75 +378,69 @@ async function generateRoute() {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(body)
                 });
-                if (!res.ok) continue; // Network error, try next attempt
+                if (!res.ok) continue; 
                 data = await res.json();
             } catch (err) {
                 console.warn(`Attempt ${attempt} failed:`, err);
                 continue;
             }
 
-            // 4. Validate Data Structure (NOT Quality)
-            if (!data.features || data.features.length === 0) {
-                console.log(`Attempt ${attempt}: No features returned by API.`);
-                continue;
-            }
+            if (!data.features || data.features.length === 0) continue;
 
-            // 5. Analyze
+            // 4. Analysis
             const coords = data.features[0].geometry.coordinates;
             const summary = data.features[0].properties.summary;
             const actualDistKm = summary.distance / 1000;
             
-            // Fix: Ensure we don't divide by zero if API returns garbage
             const safeTarget = targetKm > 0 ? targetKm : 5;
-            const distanceError = Math.abs(actualDistKm - safeTarget) / safeTarget;
+            const distDiff = Math.abs(actualDistKm - safeTarget);
+            const distanceError = distDiff / safeTarget;
             
             const quality = analyzeRouteQuality(coords);
             const ov = overlapStats(coords);
 
-            // Update feedback loop for next attempt
+            // FEEDBACK LOOP: Adjust lengthFactor for the NEXT attempt.
+            // If we wanted 5.0 and got 4.0, ratio is 1.25. Next time ask for 1.25x more.
             if (actualDistKm > 0.1) {
-                lengthFactor = lengthFactor * (safeTarget / actualDistKm);
+                const correction = safeTarget / actualDistKm;
+                // Dampen the correction slightly to prevent oscillation, but allow growth
+                lengthFactor = lengthFactor * (0.5 + (0.5 * correction));
             }
 
-            // 6. Calculate Score
-            // Lower is better. 
-            // We penalize distance error heavily, overlap massively, and bad closure slightly.
+            // 5. Scoring
+            // Heavy penalty for distance mismatch.
             const score = 
-                (distanceError * 1000) + 
-                (ov.overlapRatio * 3000) + 
-                (quality.closureMeters * 2); // 1 meter gap = 2 points penalty
+                (distanceError * 5000) +       // Primary Objective: Hit the distance
+                (ov.overlapRatio * 2000) +     // Secondary: Don't backtrack
+                (quality.closureMeters * 5);   // Tertiary: Close the loop
 
-            console.log(`Attempt ${attempt}: km=${actualDistKm.toFixed(2)} err=${distanceError.toFixed(2)} score=${Math.round(score)}`);
+            console.log(`Attempt ${attempt}: Req=${(adjustedDistance/1000).toFixed(1)}km | Act=${actualDistKm.toFixed(2)}km | Pts=${pointsVal} | Score=${Math.round(score)}`);
 
-            // 7. Update Best Candidate
-            // We take the new route if:
-            // a) We have no route yet (bestRoute is null)
-            // b) This route has a better (lower) score
             if (!bestRoute || score < bestScore) {
                 bestScore = score;
                 bestRoute = data;
             }
 
-            // 8. "Good Enough" Check (Optimization)
-            // Only stop searching if we found a GREAT route.
-            // Otherwise, keep looking through all 5 attempts to find the best one.
-            const isPerfect = 
-                distanceError < 0.08 &&       // Within 8% distance
-                ov.overlapRatio < 0.05 &&     // Very little overlap
-                quality.closureMeters < 150;  // Ends near start
+            // 6. Strict Success Criteria
+            // Stop ONLY if distance is within +/- 300m (0.3km) AND geometry is clean
+            const isAccurate = distDiff < 0.3; // Strict 300m tolerance
+            const isClean = ov.overlapRatio < 0.05 && quality.closureMeters < 150;
 
-            if (isPerfect) break;
+            if (isAccurate && isClean) break;
         }
 
-        // 9. Final Decision
         if (!bestRoute) {
-            throw new Error("API could not generate any valid geometry for this location.");
+            throw new Error("Unable to generate valid geometry.");
         }
 
-        // If we found a good route, cache it.
         const bestCoords = bestRoute.features[0].geometry.coordinates;
         const bestOv = overlapStats(bestCoords);
-        if (bestOv.overlapRatio < 0.10) {
+        
+        // Only cache if it's reasonably good (within 10% distance)
+        const bestSummary = bestRoute.features[0].properties.summary;
+        const bestDiff = Math.abs((bestSummary.distance/1000) - targetKm);
+        
+        if (bestDiff < (targetKm * 0.1) && bestOv.overlapRatio < 0.10) {
             saveCachedRoute(cacheKey, bestRoute);
         }
 
@@ -442,29 +448,12 @@ async function generateRoute() {
 
     } catch (e) {
         console.error("Route Error:", e);
-        stats.innerHTML = "Route generation failed. Try moving start point.";
+        stats.innerHTML = "Optimization failed. Try a different start point.";
         alert(e.message);
     } finally {
         btn.disabled = false;
         btn.innerText = "Generate Loop";
     }
-}
-
-// Helper to render and update stats
-function renderRoute(geojson) {
-    if (routeLayer) map.removeLayer(routeLayer);
-    
-    routeLayer = L.geoJSON(geojson, {
-        style: { color: '#3a7bd5', weight: 5, opacity: 0.8 }
-    }).addTo(map);
-    
-    map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
-
-    const summary = geojson.features[0].properties.summary;
-    const finalDistKm = (summary.distance / 1000).toFixed(2);
-    const runningTimeMin = Math.round((summary.distance / 1000) / 10 * 60); // 10km/h pace
-    
-    document.getElementById('stats').innerHTML = `${finalDistKm} km • ${runningTimeMin} min (10 km/h)`;
 }
 
 </script>
