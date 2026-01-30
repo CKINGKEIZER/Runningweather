@@ -78,7 +78,7 @@
             <input type="text" id="city-input" placeholder="Search city (e.g. London)" autocomplete="off">
             <div id="suggestions" class="suggestions"></div>
         </div>
-        
+
         <div class="action-row">
             <button class="action-btn btn-secondary" onclick="saveRoute()">★ Save Route</button>
             <button class="action-btn btn-secondary" onclick="downloadImage()">⬇ Download Image</button>
@@ -148,7 +148,14 @@ function saveCachedRoute(key, geojson) {
 
     // Init Map
     map = L.map('map').setView([51.505, -0.09], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
+    // Init Map
+    map = L.map('map').setView([51.505, -0.09], 13);
+    
+    // CHANGED: Added crossOrigin: true to allow screenshots
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { 
+        attribution: '&copy; OpenStreetMap',
+        crossOrigin: true 
+    }).addTo(map);
 
      // 1. Check LocalStorage First
     const savedLoc = localStorage.getItem('userLocation');
@@ -652,16 +659,21 @@ function saveRoute() {
 }
 
 function loadFavorite(id) {
-    const favorites = JSON.parse(localStorage.getItem('favoriteRoutes') || '[]');
-    const item = favorites.find(x => x.id === id);
-    if (item) {
-        renderRoute(item.geojson);
-        // Also center map on it
-        const lat = item.geojson.features[0].geometry.coordinates[0][1];
-        const lng = item.geojson.features[0].geometry.coordinates[0][0];
-        setStartPoint(lat, lng);
+        const favorites = JSON.parse(localStorage.getItem('favoriteRoutes') || '[]');
+        const item = favorites.find(x => x.id === id);
+        if (item) {
+            // 1. Set the global variable so we can save it again if needed
+            lastGeneratedRoute = item.geojson; 
+            
+            // 2. Set the start marker FIRST (this clears any existing route)
+            const lat = item.geojson.features[0].geometry.coordinates[0][1];
+            const lng = item.geojson.features[0].geometry.coordinates[0][0];
+            setStartPoint(lat, lng);
+
+            // 3. Render the route AFTER the marker is set
+            renderRoute(item.geojson);
+        }
     }
-}
 
 function deleteFavorite(id, event) {
     event.stopPropagation(); // prevent clicking the row
