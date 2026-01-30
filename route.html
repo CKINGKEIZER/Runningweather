@@ -85,10 +85,12 @@
     let selectedLat = null, selectedLng = null;
     let debounceTimer;
     const ROUTE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+    const ROUTE_ALGO_VERSION = "v3";
 
 function routeCacheKey(lat, lng, km) {
-  return `routeCache:${lat.toFixed(5)},${lng.toFixed(5)}:${km.toFixed(1)}`;
+  return `routeCache:${ROUTE_ALGO_VERSION}:${lat.toFixed(5)},${lng.toFixed(5)}:${km.toFixed(1)}`;
 }
+
 
 function loadCachedRoute(key) {
   try {
@@ -366,14 +368,6 @@ for (let attempt = 0; attempt < maxAttempts; attempt++) {
       // Avoid obvious “annoying” foot-routing artifacts where possible
       avoid_features: ["fords", "ferries", "steps"],
 
-      // Use documented structure for weightings (foot-* supports green/quiet)
-      profile_params: {
-  weightings: {
-    green: { factor: 0.6 },
-    quiet: { factor: 0.8 }
-  }
-},
-
       // More points tends to be more circular (per docs), keep it stable
       round_trip: { length: adjustedDistance, points: 6, seed }
     }
@@ -443,7 +437,13 @@ for (let attempt = 0; attempt < maxAttempts; attempt++) {
         if (!bestRoute) {
             throw new Error("Could not find a suitable loop. Try a different location or distance.");
         }
-        saveCachedRoute(cacheKey, bestRoute);
+        {
+  const coords = bestRoute.features[0].geometry.coordinates;
+  const ov = overlapStats(coords);
+  if (ov.overlapRatio < 0.08 && ov.uniqueRatio > 0.75) {
+    saveCachedRoute(cacheKey, bestRoute);
+  }
+}
 
         // Render the best route
         routeLayer = L.geoJSON(bestRoute, {
