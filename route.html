@@ -15,18 +15,27 @@
         .btn-secondary:hover { background: #e2e8f0; }
         
         /* Saved Routes List */
-        .saved-list { 
-              margin-top: 20px; 
-              border-top: 1px solid #e2e8f0; 
-              padding-top: 20px; /* Fixed: was paddingTop */
-          }
-        .saved-item { 
-            display: flex; justify-content: space-between; align-items: center; 
-            padding: 12px; background: #f8fafc; border-radius: 8px; margin-bottom: 8px; cursor: pointer;
-            transition: background 0.2s;
-        }
-        .saved-item:hover { background: #eff6ff; }
-        .delete-btn { color: #ef4444; font-weight: bold; padding: 4px 8px; cursor: pointer; }
+       .saved-list { 
+             margin-top: 20px; 
+             border-top: 1px solid #e2e8f0; 
+             padding-top: 10px;
+       }
+       .saved-header {
+           display: flex; justify-content: space-between; align-items: center;
+           cursor: pointer; padding: 10px 5px; user-select: none; border-radius: 8px;
+       }
+       .saved-header:hover { background: #f8fafc; }
+       .saved-header h3 { margin: 0; font-size: 1rem; color: #1e293b; }
+       .saved-arrow { font-size: 0.8rem; color: #64748b; transition: transform 0.2s; }
+       .saved-arrow.collapsed { transform: rotate(-90deg); }
+       
+       .saved-item { 
+           display: flex; justify-content: space-between; align-items: center; 
+           padding: 12px; background: #f8fafc; border-radius: 8px; margin-bottom: 8px; cursor: pointer;
+           transition: background 0.2s;
+       }
+       .saved-item:hover { background: #eff6ff; }
+       .delete-btn { color: #ef4444; font-weight: bold; padding: 4px 8px; cursor: pointer; }
     </style>
     
     <style>
@@ -85,8 +94,11 @@
         </div>
 
         <div id="saved-routes-container" class="saved-list">
-            <h3 style="font-size:1rem; margin-bottom:10px;">My Saved Routes</h3>
-            <div id="saved-list"></div>
+            <div class="saved-header" onclick="toggleSavedRoutes()">
+                <h3>My Saved Routes</h3>
+                <span id="saved-arrow" class="saved-arrow">▼</span>
+            </div>
+            <div id="saved-list" style="display: block; margin-top: 10px;"></div>
         </div>
         <div id="map"></div>
 
@@ -607,11 +619,13 @@ async function generateRoute() {
 }
 // ---------------------------------------------------------
 // Feature: Screenshot / Download Image
-// ---------------------------------------------------------
-// Initialize the plugin (must run after map is created)
-const screenshoter = L.simpleMapScreenshoter({
-    hidden: true // hide the default download button (we use our own)
-}).addTo(map);
+// Initialize the plugin (Wrapped in try-catch to prevent crash if plugin fails to load)
+let screenshoter;
+try {
+    if (typeof L.simpleMapScreenshoter !== 'undefined') {
+        screenshoter = L.simpleMapScreenshoter({ hidden: true }).addTo(map);
+    }
+} catch (e) { console.warn("Screenshot plugin failed:", e); }
 
 function downloadImage() {
     if (!routeLayer) return alert("Generate a route first.");
@@ -631,7 +645,19 @@ function downloadImage() {
             alert("Error creating image. Note: This feature requires a web server (localhost or https) to handle cross-origin map tiles.");
         });
 }
+function toggleSavedRoutes() {
+    const list = document.getElementById('saved-list');
+    const arrow = document.getElementById('saved-arrow');
+    const isHidden = list.style.display === 'none';
 
+    if (isHidden) {
+        list.style.display = 'block';
+        arrow.classList.remove('collapsed');
+    } else {
+        list.style.display = 'none';
+        arrow.classList.add('collapsed');
+    }
+}
 // ---------------------------------------------------------
 // Feature: Save / Load Favorites (LocalStorage)
 // ---------------------------------------------------------
