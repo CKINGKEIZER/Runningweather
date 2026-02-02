@@ -23,25 +23,27 @@
         .nav-buttons {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-top: 20px;
-            padding-top: 20px;
-            border-top: 1px solid #e2e8f0;
+            gap: 12px;
+            margin-bottom: 24px; /* Adds space between buttons and search bar */
+            margin-top: 0;       /* Removes extra top space */
+            padding-top: 0;
+            border-top: none;    /* Removes the thin grey line */
         }
         .nav-btn {
             text-decoration: none;
             padding: 12px;
             text-align: center;
             border-radius: 12px;
-            font-weight: 600;
+            font-weight: 700;    /* Made slightly bolder */
             font-size: 0.9rem;
             transition: all 0.2s;
-            background: #f8fafc;
-            color: var(--text);
+            background: #e2e8f0; /* Darker gray to distinguish from the white input box */
+            color: #64748b;
             border: 2px solid transparent;
         }
         .nav-btn:hover {
-            background: #e2e8f0;
+            background: #cbd5e1;
+            color: var(--text);
         }
         /* Active state for current page */
         .nav-btn.active {
