@@ -513,11 +513,14 @@ function renderRouteStats(geojson) {
     const summary = geojson.features[0].properties.summary;
     const distKm = summary.distance / 1000;
     
-    // Calculate running time (10km/h pace)
+    // Calculate running time (based on 10km/h pace)
     const runningTimeMin = Math.round(distKm / 10 * 60);
 
-    // Update stats with formatted distance
-    document.getElementById('stats').innerHTML = `${formatDist(distKm)} • ${runningTimeMin} min (10 km/h)`;
+    // Switch the pace label based on unit
+    const paceLabel = isMetric ? "(10 km/h)" : "(~6.2 mph)";
+
+    // Update stats
+    document.getElementById('stats').innerHTML = `${formatDist(distKm)} • ${runningTimeMin} min ${paceLabel}`;
 }
 
 // ---------------------------------------------------------
