@@ -7,6 +7,57 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
 
     <style>
+        /* Unit Toggle Switch */
+        .unit-switch-wrapper {
+            position: absolute;
+            top: 2rem;
+            right: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: #64748b;
+            z-index: 10;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 22px;
+        }
+
+        .switch input { opacity: 0; width: 0; height: 0; }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #e2e8f0;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+
+        input:checked + .slider { background-color: var(--secondary); }
+        input:checked + .slider:before { transform: translateX(18px); }
+
+        @media (max-width: 480px) {
+            .unit-switch-wrapper { top: 1.5rem; right: 1.5rem; }
+        }
         /* New Action Buttons */
         .action-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
         .btn-secondary { background: #f1f5f9; color: #1e293b; border: 1px solid #cbd5e1; }
@@ -110,6 +161,14 @@
 
 <div class="wrapper">
     <div class="card">
+        <div class="unit-switch-wrapper">
+            <span>km</span>
+            <label class="switch">
+                <input type="checkbox" id="unitToggle" onchange="toggleUnits()">
+                <span class="slider"></span>
+            </label>
+            <span>mi</span>
+        </div>
         <h1>Route Finder</h1>
         <p class="subtitle">Search city. Set start point. Generate loop.</p>
         <div class="nav-buttons">
@@ -166,6 +225,44 @@
     let debounceTimer;
     const ROUTE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
     const ROUTE_ALGO_VERSION = "v3";
+
+    // NEW: Load preference from LocalStorage (Syncs with other page)
+    let isMetric = JSON.parse(localStorage.getItem('runWeatherMetric') ?? 'true');
+    // Set toggle state on load
+    window.addEventListener('DOMContentLoaded', () => {
+        const toggle = document.getElementById('unitToggle');
+        if (toggle) toggle.checked = !isMetric;
+        updateSliderLabel(); // Update slider text immediately
+    });
+
+    function formatDist(km) {
+        if (isMetric) return `${km.toFixed(1)} km`;
+        return `${(km * 0.621371).toFixed(1)} mi`;
+    }
+
+    function toggleUnits() {
+        const checkbox = document.getElementById('unitToggle');
+        isMetric = !checkbox.checked; // Unchecked = Metric (km)
+        
+        // Save to share with index.html
+        localStorage.setItem('runWeatherMetric', JSON.stringify(isMetric));
+
+        // Update UI
+        updateSliderLabel();
+        
+        // Re-render Saved Routes
+        renderFavorites();
+
+        // Re-render Stats if a route exists
+        if (lastGeneratedRoute) {
+            renderRouteStats(lastGeneratedRoute);
+        }
+    }
+
+    function updateSliderLabel() {
+        const val = parseFloat(document.getElementById('dist-slider').value);
+        document.getElementById('dist-val').innerText = formatDist(val);
+    }
 
 function routeCacheKey(lat, lng, km) {
   return `routeCache:${ROUTE_ALGO_VERSION}:${lat.toFixed(5)},${lng.toFixed(5)}:${km.toFixed(1)}`;
@@ -281,8 +378,9 @@ function saveCachedRoute(key, geojson) {
 }
 
 
-    document.getElementById('dist-slider').addEventListener('input', e => {
-        document.getElementById('dist-val').innerText = parseFloat(e.target.value).toFixed(1);
+document.getElementById('dist-slider').addEventListener('input', e => {
+        // Keep value as KM internally, but display format
+        document.getElementById('dist-val').innerText = formatDist(parseFloat(e.target.value));
     });
 
     // Helper function to analyze route quality
@@ -407,14 +505,19 @@ function renderRoute(geojson) {
 
     map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
 
-    const summary = geojson.features[0].properties.summary;
-    const finalDistKm = (summary.distance / 1000).toFixed(2);
-    
-    // Calculate running time: (Distance in km / 10 km/h) * 60 minutes
-    const runningTimeMin = Math.round((summary.distance / 1000) / 10 * 60);
+    renderRouteStats(geojson);
+}
 
-    // Update stats
-    document.getElementById('stats').innerHTML = `${finalDistKm} km • ${runningTimeMin} min (10 km/h)`;
+// Separate function so we can call it from toggleUnits()
+function renderRouteStats(geojson) {
+    const summary = geojson.features[0].properties.summary;
+    const distKm = summary.distance / 1000;
+    
+    // Calculate running time (10km/h pace)
+    const runningTimeMin = Math.round(distKm / 10 * 60);
+
+    // Update stats with formatted distance
+    document.getElementById('stats').innerHTML = `${formatDist(distKm)} • ${runningTimeMin} min (10 km/h)`;
 }
 
 // ---------------------------------------------------------
@@ -766,15 +869,19 @@ function renderFavorites() {
         return;
     }
 
-    list.innerHTML = favorites.map(item => `
+    list.innerHTML = favorites.map(item => {
+        // item.dist is stored as a string "5.00" (km). We parse it to apply formatting.
+        const kmVal = parseFloat(item.dist);
+        
+        return `
         <div class="saved-item" onclick="loadFavorite(${item.id})">
             <div>
-                <strong>${item.dist} km</strong> in ${item.city}
+                <strong>${formatDist(kmVal)}</strong> in ${item.city}
                 <div style="font-size:0.8rem; color:#64748b;">${item.date}</div>
             </div>
             <div class="delete-btn" onclick="deleteFavorite(${item.id}, event)">✕</div>
         </div>
-    `).join('');
+    `}).join('');
 }
 
 // Initial render on page load

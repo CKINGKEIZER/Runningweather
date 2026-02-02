@@ -311,8 +311,16 @@ let currentMode = 'asap';
 let currentSubMode = 'morning'; 
 let debounceTimer;
 // NEW: Unit State & Storage
-let isMetric = true;
-let lastBestResult = null; 
+// NEW: Unit State & Storage
+// Load from storage (or default to true)
+let isMetric = JSON.parse(localStorage.getItem('runWeatherMetric') ?? 'true');
+let lastBestResult = null;
+
+// Set the switch position correctly when the page loads
+window.addEventListener('DOMContentLoaded', () => {
+     const toggle = document.getElementById('unitToggle');
+     if(toggle) toggle.checked = !isMetric;
+});
 
 function formatTemp(c) {
     if (isMetric) return `${c.toFixed(1)}°C`;
@@ -330,9 +338,15 @@ function formatPrecip(mm) {
 }
 
 function toggleUnits() {
-    isMetric = !document.getElementById('unitToggle').checked; // Checked = Fahrenheit
-    if (lastBestResult) renderResult(lastBestResult);
-}
+        const checkbox = document.getElementById('unitToggle');
+        isMetric = !checkbox.checked;
+        
+        // 2. Add this line to SAVE the preference
+        localStorage.setItem('runWeatherMetric', JSON.stringify(isMetric));
+        
+        // ... rest of your index.html toggle logic ...
+        if (lastBestResult) renderResult(lastBestResult);
+    }
 
 const RUN_DURATION_MIN = 45;
 const EARLINESS_PENALTY_PER_HOUR = 1.5;
