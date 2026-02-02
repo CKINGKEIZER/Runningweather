@@ -18,7 +18,58 @@
     <style>
         :root { --primary: #00d2ff; --secondary: #3a7bd5; --accent: #ff9a9e; --bg: #f1f5f9; --text: #1e293b; }
         body { font-family: -apple-system, system-ui, sans-serif; background: linear-gradient(135deg, var(--primary), var(--secondary)); color: var(--text); min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; padding: 20px; box-sizing: border-box; }
-        
+        /* Unit Toggle Switch */
+        .unit-switch-wrapper {
+            position: absolute;
+            top: 2rem;
+            right: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: #64748b;
+            z-index: 10;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 22px;
+        }
+
+        .switch input { opacity: 0; width: 0; height: 0; }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #e2e8f0;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+
+        input:checked + .slider { background-color: var(--secondary); }
+        input:checked + .slider:before { transform: translateX(18px); }
+
+        /* Mobile adjustment for toggle position */
+        @media (max-width: 480px) {
+            .unit-switch-wrapper { top: 1.5rem; right: 1.5rem; }
+        }
         /* NAVIGATION BUTTONS */
         .nav-buttons {
             display: grid;
@@ -189,6 +240,14 @@
 
 <div class="wrapper">
     <div class="card">
+        <div class="unit-switch-wrapper">
+            <span>°C</span>
+            <label class="switch">
+                <input type="checkbox" id="unitToggle" onchange="toggleUnits()">
+                <span class="slider"></span>
+            </label>
+            <span>°F</span>
+        </div>
         <h1>Run Planner & Route Generator</h1>
         <p class="subtitle">Pick the best weather window. Generate a loop route in seconds.</p>
         <div class="nav-buttons">
@@ -251,6 +310,29 @@ let selectedTimezone = null;
 let currentMode = 'asap';
 let currentSubMode = 'morning'; 
 let debounceTimer;
+// NEW: Unit State & Storage
+let isMetric = true;
+let lastBestResult = null; 
+
+function formatTemp(c) {
+    if (isMetric) return `${c.toFixed(1)}°C`;
+    return `${((c * 9/5) + 32).toFixed(1)}°F`;
+}
+
+function formatSpeed(kmh) {
+    if (isMetric) return `${kmh.toFixed(0)}km/h`;
+    return `${(kmh * 0.621371).toFixed(0)}mph`;
+}
+
+function formatPrecip(mm) {
+     if (isMetric) return `${mm.toFixed(1)}mm`;
+     return `${(mm * 0.0393701).toFixed(2)}"`;
+}
+
+function toggleUnits() {
+    isMetric = !document.getElementById('unitToggle').checked; // Checked = Fahrenheit
+    if (lastBestResult) renderResult(lastBestResult);
+}
 
 const RUN_DURATION_MIN = 45;
 const EARLINESS_PENALTY_PER_HOUR = 1.5;
@@ -668,7 +750,64 @@ function getWittyComment(best, nowMs) {
         "Touch grass. Fast."
     ]);
 }
+function renderResult(best) {
+    const resultArea = document.getElementById('result-area');
+    const nowMs = Date.now();
+    const comment = getWittyComment(best, nowMs);
+    
+    // --- BADGE LOGIC RE-RUN ---
+    // (We need to grab the Sunset time string if it was stored, 
+    // or we can just simplify and pass it if needed. 
+    // For now, let's keep the logic simple: re-calculate badge visibility)
+    
+    let hydroHTML = '';
+    // Note: Use raw Celsius for logic (best.temp), use formatted for display
+    if (best.temp >= 20) {
+        hydroHTML = `<div class="badge hydro-badge">💧 Hydration Req.</div>`;
+    }
 
+    let aqiHTML = '';
+    if (best.aqi !== null) {
+        let aqiClass = 'aqi-good';
+        let aqiText = 'Good';
+        const val = Math.round(best.aqi);
+        
+        if (val < 40) { aqiClass = 'aqi-good'; aqiText = `AQI: ${val} (Clean)`; } 
+        else if (val < 65) { aqiClass = 'aqi-fair'; aqiText = `AQI: ${val} (Fair)`; } 
+        else { aqiClass = 'aqi-poor'; aqiText = `AQI: ${val} (Poor)`; }
+        
+        aqiHTML = `<div class="badge ${aqiClass}">🍃 ${aqiText}</div>`;
+    }
+
+    // Pass sunset HTML through if it exists in the object (see step C below)
+    let sunsetHTML = best.sunsetHTML || ''; 
+
+    let label = "Top Pick";
+    if (currentMode === 'tonight') label = "Best Evening Slot";
+    if (currentMode === '3day') label = `Best ${currentSubMode.charAt(0).toUpperCase() + currentSubMode.slice(1)} Run`;
+
+    resultArea.innerHTML = `
+        <div class="result-box">
+            <div class="tag">${label}</div>
+            <div class="time">${best.displayTime}</div>
+            <div class="meta">
+                <span>${formatTemp(best.temp)}</span>
+                <span>💧 ${Math.round(best.precipProb)}% · ${formatPrecip(best.precipMm)}</span>
+                <span>💨 ${formatSpeed(best.wind)} · gust ${formatSpeed(best.gust)}</span>
+            </div>
+
+            <div class="badges-container">
+                ${aqiHTML}
+                ${hydroHTML}
+                ${sunsetHTML}
+            </div>
+
+            <div class="comment">"${comment}"</div>
+        </div>
+        <button onclick="calculateRun()" style="margin-top:10px; background:white; border:1px solid #ddd;">Refresh</button>
+    `;
+    resultArea.style.display = 'block';
+}
 // --- Calculation ---
 async function calculateRun() {
     const resultArea = document.getElementById('result-area');
@@ -790,90 +929,49 @@ candidates = candidates.filter(c => c.timeObj.getTime() >= nowMs);
 
 
         if (candidates.length === 0) {
-            resultArea.innerHTML = '<p style="text-align:center;">No matching time slots found.</p>';
-            return;
-        }
+                    resultArea.innerHTML = '<p style="text-align:center;">No matching time slots found.</p>';
+                    return;
+                }
 
-        const best = pickBestStart(candidates, nowMs);
-        if (!best) {
-        resultArea.innerHTML = '<p style="text-align:center;">No matching time slots found.</p>';
-        return;
-        }
-        const comment = getWittyComment(best, nowMs);
-        
-        // --- BADGE LOGIC ---
-        let sunsetHTML = '';
-        if (currentMode === 'tonight' || (currentMode === '3day' && currentSubMode === 'evening')) {
-                        const dayKeyToIndex = new Map();
-            for (let d = 0; d < data.daily.time.length; d++) {
-                const dayKey = getTzParts(new Date(data.daily.time[d] * 1000), selectedTimezone).dateKey;
-                dayKeyToIndex.set(dayKey, d);
-            }
-            const dayIndex = dayKeyToIndex.get(best.dateKey);
-            if (dayIndex !== -1) {
-                const sunsetUnix = data.daily.sunset[dayIndex];
-                const sunsetTime = new Intl.DateTimeFormat('en-GB', {
-                    timeZone: selectedTimezone,
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: false
-                }).format(new Date(sunsetUnix * 1000));
-                sunsetHTML = `<div class="badge sunset-badge">Sunset: ${sunsetTime}</div>`;
-            }
-        }
+                const best = pickBestStart(candidates, nowMs);
+                if (!best) {
+                    resultArea.innerHTML = '<p style="text-align:center;">No matching time slots found.</p>';
+                    return;
+                }
 
-        let hydroHTML = '';
-        if (best.temp >= 20) {
-            hydroHTML = `<div class="badge hydro-badge">💧 Hydration Req.</div>`;
-        }
-
-        let aqiHTML = '';
-        if (best.aqi !== null) {
-            let aqiClass = 'aqi-good';
-            let aqiText = 'Good';
-            const val = Math.round(best.aqi);
-            
-            if (val < 40) {
-                aqiClass = 'aqi-good'; aqiText = `AQI: ${val} (Clean)`;
-            } else if (val < 65) {
-                aqiClass = 'aqi-fair'; aqiText = `AQI: ${val} (Fair)`;
-            } else {
-                aqiClass = 'aqi-poor'; aqiText = `AQI: ${val} (Poor)`;
-            }
-            aqiHTML = `<div class="badge ${aqiClass}">🍃 ${aqiText}</div>`;
-        }
-
-        let label = "Top Pick";
-        if (currentMode === 'tonight') label = "Best Evening Slot";
-        if (currentMode === '3day') label = `Best ${currentSubMode.charAt(0).toUpperCase() + currentSubMode.slice(1)} Run`;
-
-        resultArea.innerHTML = `
-            <div class="result-box">
-                <div class="tag">${label}</div>
-                <div class="time">${best.displayTime}</div>
-                <div class="meta">
-                    <span>${best.temp.toFixed(1)}°C</span>
-                    <span>💧 ${Math.round(best.precipProb)}% · ${best.precipMm.toFixed(1)}mm</span>
-                    <span>💨 ${best.wind.toFixed(0)}km/h · gust ${best.gust.toFixed(0)}km/h</span>
-                </div>
-
+                // --- SUNSET LOGIC (Stays here because it needs 'data') ---
+                let sunsetHTML = '';
+                if (currentMode === 'tonight' || (currentMode === '3day' && currentSubMode === 'evening')) {
+                    const dayKeyToIndex = new Map();
+                    for (let d = 0; d < data.daily.time.length; d++) {
+                        const dayKey = getTzParts(new Date(data.daily.time[d] * 1000), selectedTimezone).dateKey;
+                        dayKeyToIndex.set(dayKey, d);
+                    }
+                    const dayIndex = dayKeyToIndex.get(best.dateKey);
+                    if (dayIndex !== undefined && dayIndex !== -1) {
+                        const sunsetUnix = data.daily.sunset[dayIndex];
+                        const sunsetTime = new Intl.DateTimeFormat('en-GB', {
+                            timeZone: selectedTimezone,
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: false
+                        }).format(new Date(sunsetUnix * 1000));
+                        sunsetHTML = `<div class="badge sunset-badge">Sunset: ${sunsetTime}</div>`;
+                    }
+                }
                 
-                <div class="badges-container">
-                    ${aqiHTML}
-                    ${hydroHTML}
-                    ${sunsetHTML}
-                </div>
+                // Save sunset HTML into the object so renderResult can use it
+                best.sunsetHTML = sunsetHTML;
 
-                <div class="comment">"${comment}"</div>
-            </div>
-            <button onclick="calculateRun()" style="margin-top:10px; background:white; border:1px solid #ddd;">Refresh</button>
-        `;
+                // --- SAVE & RENDER ---
+                lastBestResult = best; // Save for the toggle switch
+                renderResult(best);    // Call the display function
 
-    } catch (e) {
-        console.error(e);
-        resultArea.innerHTML = '<p style="color:red; text-align:center;">Error fetching weather/AQI data.</p>';
-    }
-}
+            } catch (e) {
+                console.error(e);
+                resultArea.innerHTML = '<p style="color:red; text-align:center;">Error fetching weather/AQI data.</p>';
+            }
+        }
 
 // --- Physiological Scoring Logic ---
 
